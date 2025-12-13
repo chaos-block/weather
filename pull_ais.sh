@@ -8,7 +8,7 @@ set -euo pipefail
 # Outputs ais_YYYYMMDDThhZ.jsonl exactly per Section 4.3 spec
 # =============================================================================
 
-source conf.env || { echo "Error: conf.env not found"; exit 1; }
+source conf.env || { echo "Error: conf.env not found. Copy conf.env.example and edit."; exit 1; }
 cd "$(dirname "$0")"
 
 # Time window: previous completed hour (H-3 start → H-2 end)
@@ -30,22 +30,17 @@ API_URL="${API_URL}/fromdate:${HOUR_START_UTC// /%20}/todate:${HOUR_END_UTC// /%
 API_URL="${API_URL}/minlat:${LAT_MIN}/maxlat:${LAT_MAX}/minlon:${LON_MIN}/maxlon:${LON_MAX}"
 
 log "Fetching AIS (JSON) – window ${HOUR_START_UTC} → ${HOUR_END_UTC}"
-log "URL: $API_URL"
 
-# Fetch and validate response
 RESPONSE=$(curl -sf --max-time 120 --retry 3 "$API_URL") || {
     log "curl failed or timed out"
     exit 1
 }
 
-# Check for MarineTraffic error message (string starting with "ERROR CODE")
 if echo "$RESPONSE" | grep -q "^ERROR CODE"; then
     log "MarineTraffic API error: $RESPONSE"
     exit 1
 fi
 
-# Process JSON array → project-spec JSONL
-# Fields: MMSI (int), LAT/LON (float), TIMESTAMP (add Z if needed), SPEED/10 → speed_kts, COURSE, HEADING
 echo "$RESPONSE" | \
 jq -c '.[] | {
     mmsi: .MMSI | tonumber,
@@ -60,7 +55,6 @@ jq -c '.[] | {
 VESSEL_COUNT=$(wc -l < "$OUTPUT_FILE")
 log "Success: ${VESSEL_COUNT} vessels written to $OUTPUT_FILE"
 
-# Completion log for monitoring
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ${FILE_TS} ${VESSEL_COUNT}" >> "${LOGS_DIR}/ais_completed.log"
 
 exit 0
