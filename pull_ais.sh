@@ -3,12 +3,12 @@ set -euo pipefail
 
 # =============================================================================
 # pull_ais.sh – MarineTraffic exportvesseltrack API (JSON protocol) – 2025-12-12
-# Fetches latest observed AIS position per MMSI in SAR bbox for the previous completed hour (H-3 → H-2)
-# Uses protocol:json → native array of objects (no CSV parsing required)
-# Outputs ais_YYYYMMDDThhZ.jsonl exactly per Section 4.3 spec
+# Fetches latest observed AIS position per MMSI in SAR bbox for previous completed hour (H-3 → H-2)
+# Uses protocol:json → native JSON array (no CSV parsing)
+# Outputs ais_YYYYMMDDThhZ.jsonl per Section 4.3 spec
 # =============================================================================
 
-source conf.env || { echo "Error: conf.env not found. Copy conf.env.example and edit."; exit 1; }
+source conf.env || { echo "Error: conf.env not found. Copy conf.env.example to conf.env and populate API key."; exit 1; }
 cd "$(dirname "$0")"
 
 # Time window: previous completed hour (H-3 start → H-2 end)
@@ -29,7 +29,7 @@ API_URL="${API_URL}/protocol:json/minutes:60/msgtype:simple"
 API_URL="${API_URL}/fromdate:${HOUR_START_UTC// /%20}/todate:${HOUR_END_UTC// /%20}"
 API_URL="${API_URL}/minlat:${LAT_MIN}/maxlat:${LAT_MAX}/minlon:${LON_MIN}/maxlon:${LON_MAX}"
 
-log "Fetching AIS (JSON) – window ${HOUR_START_UTC} → ${HOUR_END_UTC}"
+log "Fetching observed AIS (JSON) – window ${HOUR_START_UTC} → ${HOUR_END_UTC}"
 
 RESPONSE=$(curl -sf --max-time 120 --retry 3 "$API_URL") || {
     log "curl failed or timed out"
@@ -53,7 +53,7 @@ jq -c '.[] | {
 }' > "$OUTPUT_FILE"
 
 VESSEL_COUNT=$(wc -l < "$OUTPUT_FILE")
-log "Success: ${VESSEL_COUNT} vessels written to $OUTPUT_FILE"
+log "Success: ${VESSEL_COUNT} vessels (0–800 var) written to $OUTPUT_FILE"
 
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ${FILE_TS} ${VESSEL_COUNT}" >> "${LOGS_DIR}/ais_completed.log"
 
