@@ -8,7 +8,7 @@ set -euo pipefail
 # Outputs ais_YYYYMMDDThhZ.jsonl exactly per Section 4.3 spec
 # =============================================================================
 
-source .env || { echo "Error: .env not found"; exit 1; }
+source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
 # Time window: previous completed hour (H-3 start → H-2 end)
@@ -45,7 +45,7 @@ if echo "$RESPONSE" | grep -q "^ERROR CODE"; then
 fi
 
 # Process JSON array → project-spec JSONL
-# Fields: MMSI, TIMESTAMP (add Z), LAT, LON, SPEED/10 → speed_kts, COURSE, HEADING
+# Fields: MMSI (int), LAT/LON (float), TIMESTAMP (add Z if needed), SPEED/10 → speed_kts, COURSE, HEADING
 echo "$RESPONSE" | \
 jq -c '.[] | {
     mmsi: .MMSI | tonumber,
