@@ -5,10 +5,9 @@ source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
 HOUR_UTC=$(date -u -d '3 hours ago' +'%Y%m%dT%H')Z
-TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"  # Fixed ISO for JSON
-
 HOUR_START=$(date -u -d '3 hours ago' +'%Y-%m-%d %H:00:00')
 HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
+TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
 
 OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 LOG_FILE="${LOGS_DIR}/stations.log"
@@ -20,7 +19,8 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE
 log "Starting stations pull for ${HOUR_UTC}"
 
 # Loop over stations
-echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fields; do
+echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat lon source fields; do
+  [ -z "$station_id" ] && continue
     log "Processing $station_id ($name at $lat,$lon) – source: $source – fields: $fields"
 
     # Initialize fields as null
@@ -117,6 +117,9 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
 
     # Output JSON line (omit null/empty fields)
     JSON="{\"station_id\":\"$station_id\",\"timestamp\":\"$TIMESTAMP\""
+    if [ "$tide_height_ft" != null ]; then JSON="$JSON,\"tide_height_ft\":$tide_height_ft"; fi
+    # Repeat for all fields (tide_speed_kts, visibility_mi, etc.)
+    JSON="$JSON}"
     [ "$tide_height_ft" != null ] && JSON="$JSON,\"tide_height_ft\":$tide_height_ft"
     [ "$tide_speed_kts" != null ] && JSON="$JSON,\"tide_speed_kts\":$tide_speed_kts"
     [ "$tide_dir_deg" != null ] && JSON="$JSON,\"tide_dir_deg\":$tide_dir_deg"
