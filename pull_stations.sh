@@ -158,8 +158,9 @@ sunrise_jd = jtransit - h0 / 360
 sunset_jd = jtransit + h0 / 360
 sunrise_time = dt.datetime.fromordinal(int(sunrise_jd)) + dt.timedelta(days=sunrise_jd - int(sunrise_jd))
 sunset_time = dt.datetime.fromordinal(int(sunset_jd)) + dt.timedelta(days=sunset_jd - int(sunset_jd))
-print(f"sunrise_time=\"{sunrise_time.strftime('%H:%M')}\"")
-print(f"sunset_time=\"{sunset_time.strftime('%H:%M')}\"")
+print("sunrise_time=" + sunrise_time.strftime('%H:%M'))
+print("sunset_time=" + sunset_time.strftime('%H:%M'))
+print("moon_phase_pct=" + str(moon_phase_pct))
 
 # Moon phase approx (0-100 % illumination)
 new_moon = dt.datetime(2000, 1, 6, 18, 14)
