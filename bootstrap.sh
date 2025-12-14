@@ -21,6 +21,19 @@ log "Fetching fresh repo to $WORK_DIR"
 git clone "$REPO_URL" "$WORK_DIR"
 cd "$WORK_DIR"
 
+# Config: Prefer persistent local conf.env (from run dir), fallback to template
+RUN_DIR="$(pwd)"  # Persistent run dir before cd to temp
+if [ -f "$RUN_DIR/conf.env" ]; then
+    cp "$RUN_DIR/conf.env" conf.env
+    log "Loaded persistent local conf.env (custom tokens preserved)"
+elif [ -f conf.env.example ]; then
+    cp conf.env.example conf.env
+    log "Created conf.env from template"
+else
+    log "ERROR: No conf.env"
+    exit 1
+fi
+
 # Config handling
 if [ -f conf.env ]; then
     log "Using existing conf.env"
