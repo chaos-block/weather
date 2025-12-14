@@ -5,7 +5,7 @@ source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
 HOUR_UTC=$(date -u -d '3 hours ago' +'%Y%m%dT%H')Z
-TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"  # Explicit for JSON (2025-12-13T23:00:00Z)
+TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"  # Fixed ISO for JSON
 
 HOUR_START=$(date -u -d '3 hours ago' +'%Y-%m-%d %H:00:00')
 HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
@@ -79,7 +79,7 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
         NDBC)
             # NDBC realtime txt (last 45 days; filter for H-3 hour line)
             URL="https://www.ndbc.noaa.gov/data/realtime2/${station_id}.txt"
-            DATA=$(curl -s "$URL" | grep "^$(date -u -d '3 hours ago' +'%Y %m %d %H')" | head -1)  # First match in hour
+            DATA=$(curl -s "$URL" | grep "^$(date -u -d '3 hours ago' +'%Y %m %d %H')" | head -1)
             if [ -n "$DATA" ]; then
                 # Parse fixed-width columns (example: year mm dd hh mm WVHT DPD APD MWD WD WSPD GST WD PRES ATMP WTMP DEWP VIS TST MWD TIDE)
                 wave_ht_ft=$(echo "$DATA" | awk '{print $6}')  # WVHT in m -> ft *3.2808
