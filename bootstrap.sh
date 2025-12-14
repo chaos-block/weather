@@ -28,6 +28,10 @@ else
 fi
 
 cd "$WORK_DIR"
+
+chmod +x pull_stations.sh pull_radar.sh pull_ais.sh archive.sh 2>/dev/null || true
+log "Ensured script executables"
+
 source conf.env
 
 mkdir -p "${CURRENT_DIR}" "${ARCHIVE_DIR}"
