@@ -35,3 +35,15 @@ mkdir -p "${CURRENT_DIR}" "${ARCHIVE_DIR}"
 log "Bootstrap complete – fresh scripts in $WORK_DIR"
 log "Run pulls manually: ./pull_stations.sh (stations), ./pull_radar.sh (radar), ./pull_ais.sh (AIS)"
 log "Data outputs: /data/current/*.jsonl (last 72h)"
+
+# Optional auto-execution
+if [ "${1:-}" = "1" ]; then
+    log "Auto-running stations only (mode 1)"
+    ./pull_stations.sh
+elif [ "${1:-}" = "2" ]; then
+    log "Auto-running radar only (mode 2)"
+    ./pull_radar.sh
+elif [ "${1:-}" = "all" ]; then
+    log "Auto-running all pulls"
+    ./pull_stations.sh && ./pull_radar.sh && ./pull_ais.sh
+fi
