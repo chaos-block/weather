@@ -116,7 +116,7 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
     esac
 
     # Output JSON line (omit null/empty fields)
-    JSON="{\"station_id\":\"$station_id\",\"timestamp\":\"${HOUR_UTC:0:13}:00:00Z\""
+    JSON="{\"station_id\":\"$station_id\",\"timestamp\":\"$TIMESTAMP\""
     [ "$tide_height_ft" != null ] && JSON="$JSON,\"tide_height_ft\":$tide_height_ft"
     [ "$tide_speed_kts" != null ] && JSON="$JSON,\"tide_speed_kts\":$tide_speed_kts"
     [ "$tide_dir_deg" != null ] && JSON="$JSON,\"tide_dir_deg\":$tide_dir_deg"
