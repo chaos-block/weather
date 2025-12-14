@@ -52,8 +52,8 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
 
             if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
                 URL="${BASE_URL}&begin_date=${HOUR_START// /}&range=1&interval=h&product=currents${TOKEN_PARAM}"
-                DATA=$(curl -s "$URL" | jq '.data[0]' 2>/dev/null || echo "{}")
-                tide_speed_kts=$(echo "$DATA" | jq -r '.s // null')
+                DATA=$(curl -s "$URL" | jq '.data[]' 2>/dev/null || echo "{}")
+                tide_height_ft=$(echo "$DATA" | jq -r 'last(.v // null)')
                 tide_dir_deg=$(echo "$DATA" | jq -r '.d // null')
             fi
 
@@ -82,8 +82,7 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
             DATA=$(curl -s "$URL" | grep "^$(date -u -d '3 hours ago' +'%Y %m %d %H')" | head -1)
             if [ -n "$DATA" ]; then
                 # Parse fixed-width columns (example: year mm dd hh mm WVHT DPD APD MWD WD WSPD GST WD PRES ATMP WTMP DEWP VIS TST MWD TIDE)
-                wave_ht_ft=$(echo "$DATA" | awk '{print $6}')  # WVHT in m -> ft *3.2808
-                if [ "$wave_ht_ft" != "MM" ]; then wave_ht_ft=$(awk "BEGIN {print $wave_ht_ft * 3.2808}") ; else wave_ht_ft=null ; fi
+                visibility_mi=$(echo "$DATA" | awk '{if ($18 != "MM") print $18 * 1.15078; else print "null"}')  # NM to statute mi
                 wind_spd_kts=$(echo "$DATA" | awk '{print $12 * 1.94384}')  # m/s to kts
                 wind_dir_deg=$(echo "$DATA" | awk '{print $11}')
                 visibility_mi=$(echo "$DATA" | awk '{print $18 * 0.539957}')  # NM to mi? Wait, NDBC VIS is in NM, spec is mi, but statute mi or nautical? Spec mi = statute, but NM is nautical mile ~1.15 statute.
@@ -103,7 +102,8 @@ echo "$STATIONS_LIST" | while IFS='|' read -r station_id name lat lon source fie
             URL="${BASE_URL}v1/observations/station/${station_id}?datetime=${HOUR_UTC:0:4}-${HOUR_UTC:4:2}-${HOUR_UTC:6:2}T${HOUR_UTC:8:2}:00:00Z"
             DATA=$(curl -s -H "Authorization: Bearer ${SMN_TOKEN}" "$URL" | jq '.observations[0]' 2>/dev/null || echo "{}")
             if [ -n "$DATA" ]; then
-                wind_spd_kts=$(echo "$DATA" | jq -r '.wind_speed // null' | awk '{print $1 * 1.94384}')  # Assume m/s to kts
+                wind_spd=$(echo "$DATA" | jq -r '.wind_speed // null')
+                  [ "$wind_spd" != null ] && wind_spd_kts=$(awk "BEGIN {print $wind_spd * 1.94384}") || wind_spd_kts=null
                 wind_dir_deg=$(echo "$DATA" | jq -r '.wind_direction // null')
                 visibility_mi=$(echo "$DATA" | jq -r '.visibility // null' | awk '{print $1 * 0.621371}')  # Assume km to mi
                 cloud_pct=$(echo "$DATA" | jq -r '.cloud_cover // null')
