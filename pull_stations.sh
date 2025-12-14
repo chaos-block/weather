@@ -4,9 +4,10 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
-HOUR_UTC=$(date -u -d '3 hours ago' +%Y%m%dT%H)Z
-HOUR_START=$(date -u -d '3 hours ago' +%Y%m%d %H:00)
-HOUR_END=$(date -u -d '2 hours ago' +%Y%m%d %H:00)
+HOUR_UTC=$(date -u -d '3 hours ago' +'%Y%m%dT%H')Z
+HOUR_START=$(date -u -d '3 hours ago' +'%Y-%m-%d %H:00:00')
+HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
+
 OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 LOG_FILE="${LOGS_DIR}/stations.log"
 
