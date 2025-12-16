@@ -10,7 +10,7 @@ HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
 TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
 
 OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
-> "$OUTPUT_FILE"          ← add this line exactly here
+> "$OUTPUT_FILE"          # Truncate file at start of run
 
 LOG_FILE="${LOGS_DIR}/stations.log"
 
