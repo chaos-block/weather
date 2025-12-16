@@ -3,7 +3,10 @@ set -euo pipefail
 
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
-
+  
+LOG_FILE="${LOGS_DIR}/stations.log"
+mkdir -p "$LOGS_DIR"
+  
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE"; }
 
 for offset in 1 2 3 4 5 6; do
