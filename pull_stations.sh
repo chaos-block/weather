@@ -4,6 +4,8 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE"; }
+
 for offset in 1 2 3 4 5 6; do
   HOUR_UTC=$(date -u -d "${offset} hours ago" +'%Y%m%dT%H')Z
   TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
@@ -32,8 +34,6 @@ OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 LOG_FILE="${LOGS_DIR}/stations.log"
 
 mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
-
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE"; }
 
 log "Starting stations pull for ${HOUR_UTC}"
 
