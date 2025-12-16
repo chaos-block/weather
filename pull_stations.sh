@@ -10,6 +10,8 @@ HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
 TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
 
 OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
+> "$OUTPUT_FILE"          ← add this line exactly here
+
 LOG_FILE="${LOGS_DIR}/stations.log"
 
 mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
@@ -83,7 +85,12 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
             if [ -n "$DATA" ]; then
                 # Parse fixed-width columns (example: year mm dd hh mm WVHT DPD APD MWD WD WSPD GST WD PRES ATMP WTMP DEWP VIS TST MWD TIDE)
                 visibility_mi=$(echo "$DATA" | awk '{if ($18 != "MM") print $18 * 1.15078; else print "null"}')  # NM to statute mi
-                wind_spd_kts=$(echo "$DATA" | awk '{print $12 * 1.94384}')  # m/s to kts
+                wind_spd_raw=$(echo "$DATA" | awk '{print $12}')
+                if [ "$wind_spd_raw" != "MM" ] && [ "$wind_spd_raw" != "" ]; then
+                  wind_spd_kts=$(awk "BEGIN {print $wind_spd_raw * 1.94384}")
+                else
+                  wind_spd_kts=null
+                fi
                 wind_dir_deg=$(echo "$DATA" | awk '{print $11}')
                 visibility_mi=$(echo "$DATA" | awk '{print $18 * 0.539957}')  # NM to mi? Wait, NDBC VIS is in NM, spec is mi, but statute mi or nautical? Spec mi = statute, but NM is nautical mile ~1.15 statute.
                 if [ "$visibility_mi" != "MM" ]; then visibility_mi=$(awk "BEGIN {print $visibility_mi * 1.15078}") ; else visibility_mi=null ; fi
