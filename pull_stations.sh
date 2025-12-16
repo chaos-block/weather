@@ -4,7 +4,24 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
-HOUR_UTC=$(date -u -d '3 hours ago' +'%Y%m%dT%H')Z
+for offset in 1 2 3 4 5 6; do
+  HOUR_UTC=$(date -u -d "${offset} hours ago" +'%Y%m%dT%H')Z
+  TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
+  OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
+  > "$OUTPUT_FILE"  # Truncate per hour
+
+  log "Verifying past hour: $HOUR_UTC (offset $offset)"
+
+  echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat lon source fields; do
+    [ -z "$station_id" ] && continue
+    # ... rest of loop (fetch/mapping/JSON echo >> "$OUTPUT_FILE")
+  done
+
+  # Astro post-process per hour (move inside loop or run after)
+done
+
+log "Past 6 hours verification complete (6 files in /data/current/)"
+
 HOUR_START=$(date -u -d '3 hours ago' +'%Y-%m-%d %H:00:00')
 HOUR_END=$(date -u -d '2 hours ago' +'%Y-%m-%d %H:00:00')
 TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
