@@ -12,9 +12,9 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE
 # Calculate lookback time once
 LOOKBACK_HOURS=3
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
-HOUR_UTC=$(date -u -d "@$(date -d "$LOOKBACK_DATE" +%s)" +'%Y%m%dT%H')Z
+HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')Z
 TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
-HOUR_YYYYMMDDHH=$(date -u -d "@$(date -d "$LOOKBACK_DATE" +%s)" +'%Y%m%d%H')
+HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 
 # Use temp file for atomic write
 TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}.jsonl.tmp"
@@ -24,10 +24,12 @@ OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 log "Starting pull for ${HOUR_UTC}"
 
 # Calculate astronomical data once (before loop)
+# Remove trailing Z for Python parsing
+HOUR_UTC_CLEAN="${HOUR_UTC%Z}"
 astro_data=$(python3 - <<PY
 import math, datetime
 
-utc = datetime.datetime.strptime("${HOUR_UTC:0:13}", "%Y%m%dT%H")
+utc = datetime.datetime.strptime("${HOUR_UTC_CLEAN}", "%Y%m%dT%H")
 
 # Moon phase calculation
 days = (utc - datetime.datetime(2000,1,6,18,14)).days + \
@@ -144,10 +146,12 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       response=$(curl -sf "https://www.ndbc.noaa.gov/data/realtime2/${station_id}.txt" 2>/dev/null || echo "")
       if [ -n "$response" ]; then
         # Extract line matching our target hour
-        line=$(echo "$response" | awk -v y=$(date -u -d "$LOOKBACK_DATE" +%Y) \
-                                       -v m=$(date -u -d "$LOOKBACK_DATE" +%m) \
-                                       -v d=$(date -u -d "$LOOKBACK_DATE" +%d) \
-                                       -v h=$(date -u -d "$LOOKBACK_DATE" +%H) \
+        year=$(date -u -d "$LOOKBACK_DATE" +%Y)
+        month=$(date -u -d "$LOOKBACK_DATE" +%m)
+        day=$(date -u -d "$LOOKBACK_DATE" +%d)
+        hour=$(date -u -d "$LOOKBACK_DATE" +%H)
+        
+        line=$(echo "$response" | awk -v y="$year" -v m="$month" -v d="$day" -v h="$hour" \
                                        '$1==y && $2==m && $3==d && $4==h {print; exit}')
         
         if [ -n "$line" ]; then
