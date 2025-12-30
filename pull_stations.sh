@@ -22,22 +22,26 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
   [ -z "$station_id" ] && continue
   log "Processing $station_id ($source)"
 
-  # Initialize all to null
-  declare -A vals=( [tide_height_ft]=null [tide_speed_kts]=null [tide_dir_deg]=null [visibility_mi]=null [cloud_pct]=null [wave_ht_ft]=null [wind_spd_kts]=null [wind_dir_deg]=null )
-
   case $source in
     NOAA)
       BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${HOUR_YYYYMMDDHH}&end_date=${HOUR_YYYYMMDDHH}&time_zone=gmt&units=english&format=json"
       [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&token=${NOAA_TOKEN}"
 
       if echo "$fields" | grep -q "tide_height_ft"; then
-        vals[tide_height_ft]=$(curl -s "${BASE}&product=hourly_height&datum=MLLW" | jq -r '.data[0].v // null')
+        response=$(curl -sf "${BASE}&product=hourly_height&datum=MLLW" 2>/dev/null)
+          if [ $? -eq 0 ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            vals[tide_height_ft]=$(echo "$response" | jq -r '.data[0].v // null')
+          else
+            log "ERROR: Failed to fetch tide height for $station_id"
+            vals[tide_height_ft]=null
+        fi
       fi
       if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
         data=$(curl -s "${BASE}&product=currents&interval=h")
-        vals[tide_speed_kts]=$(echo "$data" | jq -r '[.data[].s] | max // null')
-        vals[tide_dir_deg]=$(echo "$data" | jq -r '.data[] | select(.s == ($(echo "$data" | jq '[.data[].s] | max'))) | .d // null' | head -1)
-      fi
+        max_speed=$(echo "$data" | jq -r '[.data[].s] | max // null')
+        vals[tide_speed_kts]=$max_speed
+        vals[tide_dir_deg]=$(echo "$data" | jq -r --arg max "$max_speed" '.data[] | select(.s == ($max | tonumber)) | .d // null' | head -1)
+      fi     
       if echo "$fields" | grep -q "wind"; then
         d=$(curl -s "${BASE}&product=wind&interval=h" | jq -r '.data[0]')
         vals[wind_spd_kts]=$(echo "$d" | jq -r '.s // null')
@@ -64,13 +68,15 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
   esac
 
   # Astro (computed later, per hour)
-  json="{ \"station_id\": \"$station_id\", \"timestamp\": \"$TIMESTAMP\", \"tide_height_ft\": ${vals[tide_height_ft]}, \"tide_speed_kts\": ${vals[tide_speed_kts]}, \"tide_dir_deg\": ${vals[tide_dir_deg]}, \"visibility_mi\": ${vals[visibility_mi]}, \"cloud_pct\": ${vals[cloud_pct]:-null}, \"wave_ht_ft\": ${vals[wave_ht_ft]:-null}, \"wind_spd_kts\": ${vals[wind_spd_kts]}, \"wind_dir_deg\": ${vals[wind_dir_deg]}, \"moon_phase_pct\": null, \"sunrise_time\": null, \"sunset_time\": null }"
+ # Remove cloud_pct from output
+json="{ \"station_id\": \"$station_id\", \"timestamp\": \"$TIMESTAMP\", \"tide_height_ft\": ${vals[tide_height_ft]}, \"tide_speed_kts\": ${vals[tide_speed_kts]}, \"tide_dir_deg\": ${vals[tide_dir_deg]}, \"visibility_mi\": ${vals[visibility_mi]}, \"wave_ht_ft\": ${vals[wave_ht_ft]:-null}, \"wind_spd_kts\": ${vals[wind_spd_kts]}, \"wind_dir_deg\": ${vals[wind_dir_deg]}, \"moon_phase_pct\": null, \"sunrise_time\": null, \"sunset_time\": null }"
 
   echo "$json" >> "$OUTPUT_FILE"
 done
 
 # Add astronomical fields (same for all stations, San Diego ref)
-python3 - <<'PY'
+# Add astronomical fields (same for all stations, San Diego ref)
+astro_output=$(python3 - <<PY
 import math, datetime
 utc = datetime.datetime.strptime("${HOUR_UTC:0:13}", "%Y%m%dT%H")
 # Simple moon phase
@@ -80,9 +86,34 @@ illum = (1 - math.cos(2*math.pi*phase)) / 2 * 100
 print(f"moon_phase_pct={illum:.1f}")
 
 # Sunrise/sunset approx (use pyephem or simple; here placeholder)
-print("sunrise_time=06:45")  # Replace with accurate lib if installed
-print("sunset_time=16:55")
+# Sunrise/sunset calculation (requires: pip install astral)
+try:
+    from astral import LocationInfo
+    from astral.sun import sun
+    # Use San Diego as reference (or pass lat/lon from shell)
+    city = LocationInfo("San Diego", "USA", "America/Los_Angeles", 32.7157, -117.1611)
+    s = sun(city.observer, date=utc.date())
+    sunrise_utc = s['sunrise'].strftime('%H:%M')
+    sunset_utc = s['sunset'].strftime('%H:%M')
+    print(f"sunrise_time={sunrise_utc}")
+    print(f"sunset_time={sunset_utc}")
+except ImportError:
+    # Fallback if astral not installed
+    print("sunrise_time=06:45")
+    print("sunset_time=16:55")
+    
 PY
+)
+
+# Extract values
+moon_phase=$(echo "$astro_output" | grep moon_phase_pct | cut -d= -f2)
+sunrise=$(echo "$astro_output" | grep sunrise_time | cut -d= -f2)
+sunset=$(echo "$astro_output" | grep sunset_time | cut -d= -f2)
+
+# Replace null astro with actual values
+sed -i "s/\"moon_phase_pct\": null/\"moon_phase_pct\": $moon_phase/g" "$OUTPUT_FILE"
+sed -i "s/\"sunrise_time\": null/\"sunrise_time\": \"$sunrise\"/g" "$OUTPUT_FILE"
+sed -i "s/\"sunset_time\": null/\"sunset_time\": \"$sunset\"/g" "$OUTPUT_FILE"
 
 # Then sed replace null astro with values in OUTPUT_FILE
 
