@@ -1,10 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-source .env
+source conf.env
 cd "$(dirname "$0")"
-HOUR_UTC=$(date -u -d '3 hours ago' +%Y%m%dT%H)Z
-OUTPUT_FILE="${CURRENT_DIR}/radar_${HOUR_UTC}.jsonl"
+HOUR_UTC=$(date -u -d '3 hours ago' +%Y%m%dT%H)
+OUTPUT_FILE="${CURRENT_DIR}/radar_${HOUR_UTC}Z.jsonl"
 mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
 
 log() { echo "[$(date -u)] radar: $1" | tee -a "${LOGS_DIR}/radar.log"; }
