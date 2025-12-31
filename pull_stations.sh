@@ -59,9 +59,9 @@ PY
 )
 
 # Extract astronomical values
-moon_phase=$(echo "$astro_data" | grep moon_phase_pct | cut -d= -f2)
-sunrise=$(echo "$astro_data" | grep sunrise_time | cut -d= -f2)
-sunset=$(echo "$astro_data" | grep sunset_time | cut -d= -f2)
+moon_phase=$(echo "$astro_data" | grep moon_phase_pct | cut -d= -f2 | tr -d ' ')
+sunrise=$(echo "$astro_data" | grep sunrise_time | cut -d= -f2 | tr -d ' ')
+sunset=$(echo "$astro_data" | grep sunset_time | cut -d= -f2 | tr -d ' ')
 
 log "Astronomical data:  moon=${moon_phase}%, sunrise=${sunrise}, sunset=${sunset}"
 
