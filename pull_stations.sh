@@ -70,7 +70,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
   [ -z "$station_id" ] && continue
   
   # Validate station_id format (alphanumeric only)
-  if ! [[ "$station_id" =~ ^[A-Z0-9]+$ ]]; then
+  if ! [[ "$station_id" =~ ^[A-Z0-9-]+$ ]]; then
     log "WARNING: Invalid station_id format: $station_id - skipping"
     continue
   fi
@@ -97,13 +97,13 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
 
       # Tide height - use water_level with hourly interval for real-time data
       if echo "$fields" | grep -q "tide_height_ft"; then
-        url="${BASE}&product=water_level&datum=MLLW&interval=h"
+        url="${BASE}&product=water_level&datum=MLLW&interval=6&time_zone=gmt&units=english&format=json"
         response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get hourly averaged data - find records matching our target hour
-          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
-             if length > 0 then (add / length) else null end')
+          # Aggregate all 6-minute observations within the target hour
+          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC: 0: 13}" \
+          '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
+          if length > 0 then (add / length) else null end')
         else
           error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
           log "WARNING: Failed to fetch tide height for $station_id: $error_msg"
