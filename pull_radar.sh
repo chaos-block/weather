@@ -4,6 +4,7 @@ set -euo pipefail
 source conf.env
 cd "$(dirname "$0")"
 HOUR_UTC=$(date -u -d '3 hours ago' +%Y%m%dT%H)
+TIMESTAMP=$(date -u -d '3 hours ago' +'%Y-%m-%dT%H:00:00Z')
 OUTPUT_FILE="${CURRENT_DIR}/radar_${HOUR_UTC}Z.jsonl"
 mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
 
@@ -21,7 +22,7 @@ lons = np.arange($LON_MAX, $LON_MIN, -0.004)  # Westward
 for i, lat in enumerate(lats):
     for j, lon in enumerate(lons):
         dbz = np.mean(scans) if scans else None  # Hourly avg, null if offline
-        print(json.dumps({'lat':lat, 'lon':lon, 'timestamp':'${HOUR_UTC:0:13}:00:00Z', 'reflectivity_dbz':dbz}))
+        print(json.dumps({'lat':lat, 'lon':lon, 'timestamp':'${TIMESTAMP}', 'reflectivity_dbz':dbz}))
 " > "$OUTPUT_FILE"
 
 log "Radar grid written: $OUTPUT_FILE (~62,500 lines)"
