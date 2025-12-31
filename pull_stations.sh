@@ -145,11 +145,11 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
             # Average speed for the hour
             vals[wind_spd_kts]=$(echo "$hour_data" | jq -r \
-              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
+              '[.[].s | select(. != null and . != "") | tonumber] | if length > 0 then (add / length) else null end')
             
             # Direction: simple arithmetic mean
             vals[wind_dir_deg]=$(echo "$hour_data" | jq -r \
-              '[.[].d | tonumber] | if length > 0 then (add / length) else null end')
+              '[.[].d | select(. != null and . != "") | tonumber] | if length > 0 then (add / length) else null end')
           fi
         else
           log "WARNING: Failed to fetch wind for $station_id"
@@ -167,7 +167,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
             # Average visibility for the hour
             vals[visibility_mi]=$(echo "$hour_data" | jq -r \
-              '[.[].v | tonumber] | if length > 0 then (add / length) else null end')
+              '[.[].v | select(. != null and . != "") | tonumber] | if length > 0 then (add / length) else null end')
           fi
         else
           log "WARNING: Failed to fetch visibility for $station_id"
