@@ -10,7 +10,7 @@ mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE"; }
 
 # Calculate lookback time once
-LOOKBACK_HOURS=3
+LOOKBACK_HOURS=2
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
 TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
