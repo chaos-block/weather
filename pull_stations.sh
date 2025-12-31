@@ -172,34 +172,34 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
                                        '$1==y && $2==m && $3==d && $4==h {print}')
         
         if [ -n "$lines" ]; then
-          # Average wave height (column 6, meters to feet: × 3.28084)
+          # Average wave height (column 9: WVHT, meters to feet: × 3.28084)
           vals[wave_ht_ft]=$(echo "$lines" | awk '{
             sum=0; count=0;
-            v=$6; if(v!="MM" && v>=0) {sum+=v; count++}
+            v=$9; if(v!="MM" && v>=0) {sum+=v; count++}
           } END {
             if(count>0) print (sum/count)*3.28084; else print "null"
           }')
           
-          # Average wind direction (column 11, degrees)
+          # Average wind direction (column 6: WDIR, degrees)
           vals[wind_dir_deg]=$(echo "$lines" | awk '{
             sum=0; count=0;
-            v=$11; if(v!="MM" && v>=0 && v<=360) {sum+=v; count++}
+            v=$6; if(v!="MM" && v>=0 && v<=360) {sum+=v; count++}
           } END {
             if(count>0) print sum/count; else print "null"
           }')
           
-          # Average wind speed (column 12, m/s to knots: × 1.94384)
+          # Average wind speed (column 7: WSPD, m/s to knots: × 1.94384)
           vals[wind_spd_kts]=$(echo "$lines" | awk '{
             sum=0; count=0;
-            v=$12; if(v!="MM" && v>=0) {sum+=v; count++}
+            v=$7; if(v!="MM" && v>=0) {sum+=v; count++}
           } END {
             if(count>0) print (sum/count)*1.94384; else print "null"
           }')
           
-          # Average visibility (column 18, nautical miles to statute miles: × 1.15078)
+          # Average visibility (column 17: VIS, nautical miles to statute miles: × 1.15078)
           vals[visibility_mi]=$(echo "$lines" | awk '{
             sum=0; count=0;
-            v=$18; if(v!="MM" && v>=0) {sum+=v; count++}
+            v=$17; if(v!="MM" && v>=0) {sum+=v; count++}
           } END {
             if(count>0) print (sum/count)*1.15078; else print "null"
           }')
