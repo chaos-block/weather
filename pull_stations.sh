@@ -12,9 +12,10 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations: $1" | tee -a "$LOG_FILE
 # Calculate lookback time once
 LOOKBACK_HOURS=3
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
-HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')Z
-TIMESTAMP="${HOUR_UTC:0:13}:00:00Z"
+HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
+TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
+DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
 # Use temp file for atomic write
 TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}.jsonl.tmp"
@@ -25,11 +26,10 @@ log "Starting pull for ${HOUR_UTC}"
 
 # Calculate astronomical data once (before loop)
 # Remove trailing Z for Python parsing
-HOUR_UTC_CLEAN="${HOUR_UTC%Z}"
 astro_data=$(python3 - <<PY
 import math, datetime
 
-utc = datetime.datetime.strptime("${HOUR_UTC_CLEAN}", "%Y%m%dT%H")
+utc = datetime.datetime.strptime("${HOUR_UTC}", "%Y%m%dT%H")
 
 # Moon phase calculation
 days = (utc - datetime.datetime(2000,1,6,18,14)).days + \
@@ -89,33 +89,48 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
 
   case $source in
     NOAA)
-      BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${HOUR_YYYYMMDDHH}&end_date=${HOUR_YYYYMMDDHH}&time_zone=gmt&units=english&format=json"
-      [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&token=${NOAA_TOKEN}"
+      # NOAA API requires begin_date and end_date in YYYYMMDD format for single day
+      DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
+      BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${DATE_YYYYMMDD}&end_date=${DATE_YYYYMMDD}&time_zone=gmt&units=english&format=json"
+      [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&application=${NOAA_TOKEN}"
 
-      # Tide height
+      # Tide height - use water_level with hourly interval for real-time data
       if echo "$fields" | grep -q "tide_height_ft"; then
-        response=$(curl -sf "${BASE}&product=hourly_height&datum=MLLW" 2>/dev/null || echo "")
+        url="${BASE}&product=water_level&datum=MLLW&interval=h"
+        response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          vals[tide_height_ft]=$(echo "$response" | jq -r '.data[0].v // null')
+          # Find the specific hour we want
+          vals[tide_height_ft]=$(echo "$response" | jq -r --arg ts "$TIMESTAMP" \
+            '.data[] | select(.t | startswith($ts[0:13])) | .v // null' | head -1)
+          [ -z "${vals[tide_height_ft]}" ] && vals[tide_height_ft]=null
         else
-          log "WARNING: Failed to fetch tide height for $station_id"
+          error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
+          log "WARNING: Failed to fetch tide height for $station_id: $error_msg"
         fi
       fi
 
       # Tidal currents (speed and direction)
       if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
-        response=$(curl -sf "${BASE}&product=currents&interval=h" 2>/dev/null || echo "")
+        url="${BASE}&product=currents"
+        response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          max_speed=$(echo "$response" | jq -r '[.data[].s] | max // null')
-          vals[tide_speed_kts]=$max_speed
+          # Get data for our specific hour
+          hour_data=$(echo "$response" | jq -r --arg ts "$TIMESTAMP" \
+            '[.data[] | select(.t | startswith($ts[0:13]))]')
           
-          # Get direction corresponding to max speed
-          if [ "$max_speed" != "null" ]; then
-            vals[tide_dir_deg]=$(echo "$response" | jq -r --arg max "$max_speed" \
-              '.data[] | select(.s == ($max | tonumber)) | .d // null' | head -1)
+          if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
+            max_speed=$(echo "$hour_data" | jq -r '[.[].s] | max // null')
+            vals[tide_speed_kts]=$max_speed
+            
+            # Get direction corresponding to max speed
+            if [ "$max_speed" != "null" ]; then
+              vals[tide_dir_deg]=$(echo "$hour_data" | jq -r --arg max "$max_speed" \
+                '.[] | select(.s == ($max | tonumber)) | .d // null' | head -1)
+            fi
           fi
         else
-          log "WARNING: Failed to fetch currents for $station_id"
+          error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
+          log "WARNING: Failed to fetch currents for $station_id: $error_msg"
         fi
       fi
 
