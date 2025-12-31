@@ -102,7 +102,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
         response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
           # Aggregate all 6-minute observations within the target hour to get hourly mean
-          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC: 0:13}" \
+          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
             '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
              if length > 0 then (add / length) else null end')
         else
