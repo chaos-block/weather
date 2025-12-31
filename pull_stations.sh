@@ -10,8 +10,8 @@ mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
 
 # Calculate lookback time once
-# INCREASED TO 4 HOURS:  NOAA observed water level data has 2-4 hour publication latency
-LOOKBACK_HOURS=4
+# INCREASED TO 5 HOURS: NOAA observed water level data has 2-4 hour publication latency
+LOOKBACK_HOURS=5
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
 TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H: 00:00Z')
@@ -137,12 +137,20 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       # Wind - only if field is explicitly requested for this station
       if echo "$fields" | grep -q "wind_spd_kts\|wind_dir_deg"; then
         response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '. data' >/dev/null 2>&1; then
-          # Get first record matching our hour
-          wind_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(. t | startswith($hour))] | .[0]')
-          vals[wind_spd_kts]=$(echo "$wind_data" | jq -r '. s // null')
-          vals[wind_dir_deg]=$(echo "$wind_data" | jq -r '. d // null')
+        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+          # Aggregate all records matching our hour
+          hour_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            '[.data[] | select(.t | startswith($hour))]')
+          
+          if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
+            # Average speed for the hour
+            vals[wind_spd_kts]=$(echo "$hour_data" | jq -r \
+              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
+            
+            # Direction: simple arithmetic mean
+            vals[wind_dir_deg]=$(echo "$hour_data" | jq -r \
+              '[.[].d | tonumber] | if length > 0 then (add / length) else null end')
+          fi
         else
           log "WARNING: Failed to fetch wind for $station_id"
         fi
@@ -152,10 +160,15 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       if echo "$fields" | grep -q "visibility_mi"; then
         response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get first record matching our hour
-          vis_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(.t | startswith($hour))] | .[0]')
-          vals[visibility_mi]=$(echo "$vis_data" | jq -r '.v // null')
+          # Aggregate all records matching our hour
+          hour_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            '[.data[] | select(.t | startswith($hour))]')
+          
+          if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
+            # Average visibility for the hour
+            vals[visibility_mi]=$(echo "$hour_data" | jq -r \
+              '[.[].v | tonumber] | if length > 0 then (add / length) else null end')
+          fi
         else
           log "WARNING: Failed to fetch visibility for $station_id"
         fi
