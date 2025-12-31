@@ -186,7 +186,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if echo "$fields" | grep -q "wave_ht_ft"; then
             vals[wave_ht_ft]=$(echo "$lines" | awk '{
               sum=0; count=0;
-              v=$9; if(v! ="MM" && v>=0) {sum+=v; count++}
+              v=$9; if(v!="MM" && v>=0) {sum+=v; count++}
             } END {
               if(count>0) print (sum/count)*3.28084; else print "null"
             }')
