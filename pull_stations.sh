@@ -4,7 +4,7 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
-LOG_FILE="${LOGS_DIR}/stations. log"
+LOG_FILE="${LOGS_DIR}/stations.log"
 mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
@@ -14,13 +14,13 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FIL
 LOOKBACK_HOURS=4
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
-TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H: 00:00Z')
+TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
 # Use temp file for atomic write
-TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}. jsonl. tmp"
-OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}. jsonl"
+TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}Z.jsonl.tmp"
+OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}Z.jsonl"
 > "$TEMP_FILE"
 
 log "Starting pull for ${HOUR_UTC}"
@@ -83,6 +83,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
     [tide_speed_kts]=null
     [tide_dir_deg]=null
     [visibility_mi]=null
+    [cloud_pct]=null
     [wave_ht_ft]=null
     [wind_spd_kts]=null
     [wind_dir_deg]=null
@@ -279,7 +280,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
 
   # Construct JSON output with all fields
   json=$(cat <<EOF
-{ "station_id": "$station_id", "timestamp": "$TIMESTAMP", "tide_height_ft": ${vals[tide_height_ft]}, "tide_speed_kts": ${vals[tide_speed_kts]}, "tide_dir_deg":  ${vals[tide_dir_deg]}, "visibility_mi": ${vals[visibility_mi]}, "wave_ht_ft": ${vals[wave_ht_ft]}, "wind_spd_kts": ${vals[wind_spd_kts]}, "wind_dir_deg": ${vals[wind_dir_deg]}, "moon_phase_pct": $moon_phase, "sunrise_time": "$sunrise", "sunset_time": "$sunset" }
+{ "station_id": "$station_id", "timestamp": "$TIMESTAMP", "tide_height_ft": ${vals[tide_height_ft]}, "tide_speed_kts": ${vals[tide_speed_kts]}, "tide_dir_deg": ${vals[tide_dir_deg]}, "visibility_mi": ${vals[visibility_mi]}, "cloud_pct": ${vals[cloud_pct]}, "wave_ht_ft": ${vals[wave_ht_ft]}, "wind_spd_kts": ${vals[wind_spd_kts]}, "wind_dir_deg": ${vals[wind_dir_deg]}, "moon_phase_pct": $moon_phase, "sunrise_time": "$sunrise", "sunset_time": "$sunset" }
 EOF
 )
 

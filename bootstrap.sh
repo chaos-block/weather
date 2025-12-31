@@ -29,7 +29,7 @@ fi
 
 cd "$WORK_DIR"
 
-chmod +x pull_stations.sh pull_radar.sh pull_ais.sh archive.sh 2>/dev/null || true
+chmod +x bootstrap.sh pull_stations.sh pull_radar.sh pull_ais.sh archive.sh 2>/dev/null || true
 log "Ensured script executables"
 
 source conf.env
