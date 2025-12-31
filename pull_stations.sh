@@ -23,6 +23,7 @@ OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 > "$TEMP_FILE"
 
 log "Starting pull for ${HOUR_UTC}"
+log "Target timestamp: ${TIMESTAMP}"
 
 # Calculate astronomical data once (before loop)
 # Remove trailing Z for Python parsing
@@ -99,10 +100,10 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
         url="${BASE}&product=water_level&datum=MLLW&interval=h"
         response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Find the specific hour we want
-          vals[tide_height_ft]=$(echo "$response" | jq -r --arg ts "$TIMESTAMP" \
-            '.data[] | select(.t | startswith($ts[0:13])) | .v // null' | head -1)
-          [ -z "${vals[tide_height_ft]}" ] && vals[tide_height_ft]=null
+          # Get hourly averaged data - find records matching our target hour
+          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
+             if length > 0 then (add / length) else null end')
         else
           error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
           log "WARNING: Failed to fetch tide height for $station_id: $error_msg"
@@ -114,19 +115,18 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
         url="${BASE}&product=currents"
         response=$(curl -sf "$url" 2>/dev/null || echo "")
         if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get data for our specific hour
-          hour_data=$(echo "$response" | jq -r --arg ts "$TIMESTAMP" \
-            '[.data[] | select(.t | startswith($ts[0:13]))]')
+          # Get data for our specific hour and calculate averages
+          hour_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            '[.data[] | select(.t | startswith($hour))]')
           
           if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
-            max_speed=$(echo "$hour_data" | jq -r '[.[].s] | max // null')
-            vals[tide_speed_kts]=$max_speed
+            # Average speed for the hour
+            vals[tide_speed_kts]=$(echo "$hour_data" | jq -r \
+              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
             
-            # Get direction corresponding to max speed
-            if [ "$max_speed" != "null" ]; then
-              vals[tide_dir_deg]=$(echo "$hour_data" | jq -r --arg max "$max_speed" \
-                '.[] | select(.s == ($max | tonumber)) | .d // null' | head -1)
-            fi
+            # Direction: simple arithmetic mean (good enough for small variations)
+            vals[tide_dir_deg]=$(echo "$hour_data" | jq -r \
+              '[.[].d | tonumber] | if length > 0 then (add / length) else null end')
           fi
         else
           error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
@@ -161,26 +161,48 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       response=$(curl -sf "https://www.ndbc.noaa.gov/data/realtime2/${station_id}.txt" 2>/dev/null || echo "")
       if [ -n "$response" ]; then
         # Extract line matching our target hour
+        # NDBC format: YY MM DD hh mm (columns 1-5)
         year=$(date -u -d "$LOOKBACK_DATE" +%Y)
         month=$(date -u -d "$LOOKBACK_DATE" +%m)
         day=$(date -u -d "$LOOKBACK_DATE" +%d)
         hour=$(date -u -d "$LOOKBACK_DATE" +%H)
         
-        line=$(echo "$response" | awk -v y="$year" -v m="$month" -v d="$day" -v h="$hour" \
-                                       '$1==y && $2==m && $3==d && $4==h {print; exit}')
+        # Get all lines for the target hour (may be multiple readings)
+        lines=$(echo "$response" | awk -v y="$year" -v m="$month" -v d="$day" -v h="$hour" \
+                                       '$1==y && $2==m && $3==d && $4==h {print}')
         
-        if [ -n "$line" ]; then
-          # Wave height (meters to feet: × 3.28084)
-          vals[wave_ht_ft]=$(echo "$line" | awk '{v=$6; if(v!="MM" && v>=0) print v*3.28084; else print "null"}')
+        if [ -n "$lines" ]; then
+          # Average wave height (column 6, meters to feet: × 3.28084)
+          vals[wave_ht_ft]=$(echo "$lines" | awk '{
+            sum=0; count=0;
+            v=$6; if(v!="MM" && v>=0) {sum+=v; count++}
+          } END {
+            if(count>0) print (sum/count)*3.28084; else print "null"
+          }')
           
-          # Wind direction (degrees)
-          vals[wind_dir_deg]=$(echo "$line" | awk '{v=$11; if(v!="MM" && v>=0 && v<=360) print v; else print "null"}')
+          # Average wind direction (column 11, degrees)
+          vals[wind_dir_deg]=$(echo "$lines" | awk '{
+            sum=0; count=0;
+            v=$11; if(v!="MM" && v>=0 && v<=360) {sum+=v; count++}
+          } END {
+            if(count>0) print sum/count; else print "null"
+          }')
           
-          # Wind speed (m/s to knots: × 1.94384)
-          vals[wind_spd_kts]=$(echo "$line" | awk '{v=$12; if(v!="MM" && v>=0) print v*1.94384; else print "null"}')
+          # Average wind speed (column 12, m/s to knots: × 1.94384)
+          vals[wind_spd_kts]=$(echo "$lines" | awk '{
+            sum=0; count=0;
+            v=$12; if(v!="MM" && v>=0) {sum+=v; count++}
+          } END {
+            if(count>0) print (sum/count)*1.94384; else print "null"
+          }')
           
-          # Visibility (nautical miles to statute miles: × 1.15078)
-          vals[visibility_mi]=$(echo "$line" | awk '{v=$18; if(v!="MM" && v>=0) print v*1.15078; else print "null"}')
+          # Average visibility (column 18, nautical miles to statute miles: × 1.15078)
+          vals[visibility_mi]=$(echo "$lines" | awk '{
+            sum=0; count=0;
+            v=$18; if(v!="MM" && v>=0) {sum+=v; count++}
+          } END {
+            if(count>0) print (sum/count)*1.15078; else print "null"
+          }')
         else
           log "WARNING: No matching data line found for $station_id at ${HOUR_UTC}"
         fi
