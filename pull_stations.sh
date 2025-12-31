@@ -4,7 +4,7 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
-LOG_FILE="${LOGS_DIR}/stations. log"
+LOG_FILE="${LOGS_DIR}/stations.log"
 mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
@@ -14,13 +14,13 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FIL
 LOOKBACK_HOURS=4
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
-TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H: 00:00Z')
+TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
 # Use temp file for atomic write
-TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}. jsonl. tmp"
-OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}. jsonl"
+TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}.jsonl.tmp"
+OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}.jsonl"
 > "$TEMP_FILE"
 
 log "Starting pull for ${HOUR_UTC}"
@@ -46,7 +46,7 @@ try:
     from astral.sun import sun
     # Use San Diego as reference location
     city = LocationInfo("San Diego", "USA", "America/Los_Angeles", 32.7157, -117.1611)
-    s = sun(city. observer, date=utc. date())
+    s = sun(city.observer, date=utc.date())
     sunrise_utc = s['sunrise'].strftime('%H:%M')
     sunset_utc = s['sunset'].strftime('%H:%M')
     print(f"sunrise_time={sunrise_utc}")
@@ -70,7 +70,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
   [ -z "$station_id" ] && continue
   
   # Validate station_id format (alphanumeric and hyphens)
-  if !  [[ "$station_id" =~ ^[A-Z0-9-]+$ ]]; then
+  if ! [[ "$station_id" =~ ^[A-Z0-9-]+$ ]]; then
     log "WARNING: Invalid station_id format: $station_id - skipping"
     continue
   fi
@@ -83,6 +83,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
     [tide_speed_kts]=null
     [tide_dir_deg]=null
     [visibility_mi]=null
+    [cloud_pct]=null
     [wave_ht_ft]=null
     [wind_spd_kts]=null
     [wind_dir_deg]=null
@@ -105,7 +106,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
             '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
              if length > 0 then (add / length) else null end')
         else
-          error_msg=$(echo "$response" | jq -r '.error. message // "HTTP error"' 2>/dev/null || echo "Connection failed")
+          error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
           log "WARNING: Failed to fetch tide height for $station_id:  $error_msg"
         fi
       fi
@@ -122,7 +123,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
             # Average speed for the hour
             vals[tide_speed_kts]=$(echo "$hour_data" | jq -r \
-              '[.[]. s | tonumber] | if length > 0 then (add / length) else null end')
+              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
             
             # Direction:  simple arithmetic mean
             vals[tide_dir_deg]=$(echo "$hour_data" | jq -r \
@@ -137,12 +138,12 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       # Wind - only if field is explicitly requested for this station
       if echo "$fields" | grep -q "wind_spd_kts\|wind_dir_deg"; then
         response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '. data' >/dev/null 2>&1; then
+        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
           # Get first record matching our hour
           wind_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(. t | startswith($hour))] | .[0]')
-          vals[wind_spd_kts]=$(echo "$wind_data" | jq -r '. s // null')
-          vals[wind_dir_deg]=$(echo "$wind_data" | jq -r '. d // null')
+            '[.data[] | select(.t | startswith($hour))] | .[0]')
+          vals[wind_spd_kts]=$(echo "$wind_data" | jq -r '.s // null')
+          vals[wind_dir_deg]=$(echo "$wind_data" | jq -r '.d // null')
         else
           log "WARNING: Failed to fetch wind for $station_id"
         fi
@@ -163,7 +164,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       ;;
 
     NDBC)
-      response=$(curl -sf "https://www.ndbc.noaa.gov/data/realtime2/${station_id}. txt" 2>/dev/null || echo "")
+      response=$(curl -sf "https://www.ndbc.noaa.gov/data/realtime2/${station_id}.txt" 2>/dev/null || echo "")
       
       # Check for 404 or empty response
       if echo "$response" | grep -qi "404\|not found" || [ -z "$response" ]; then
@@ -185,7 +186,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if echo "$fields" | grep -q "wave_ht_ft"; then
             vals[wave_ht_ft]=$(echo "$lines" | awk '{
               sum=0; count=0;
-              v=$9; if(v! ="MM" && v>=0) {sum+=v; count++}
+              v=$9; if(v!="MM" && v>=0) {sum+=v; count++}
             } END {
               if(count>0) print (sum/count)*3.28084; else print "null"
             }')
@@ -279,7 +280,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
 
   # Construct JSON output with all fields
   json=$(cat <<EOF
-{ "station_id": "$station_id", "timestamp": "$TIMESTAMP", "tide_height_ft": ${vals[tide_height_ft]}, "tide_speed_kts": ${vals[tide_speed_kts]}, "tide_dir_deg":  ${vals[tide_dir_deg]}, "visibility_mi": ${vals[visibility_mi]}, "wave_ht_ft": ${vals[wave_ht_ft]}, "wind_spd_kts": ${vals[wind_spd_kts]}, "wind_dir_deg": ${vals[wind_dir_deg]}, "moon_phase_pct": $moon_phase, "sunrise_time": "$sunrise", "sunset_time": "$sunset" }
+{ "station_id": "$station_id", "timestamp": "$TIMESTAMP", "tide_height_ft": ${vals[tide_height_ft]}, "tide_speed_kts": ${vals[tide_speed_kts]}, "tide_dir_deg": ${vals[tide_dir_deg]}, "visibility_mi": ${vals[visibility_mi]}, "cloud_pct": ${vals[cloud_pct]}, "wave_ht_ft": ${vals[wave_ht_ft]}, "wind_spd_kts": ${vals[wind_spd_kts]}, "wind_dir_deg": ${vals[wind_dir_deg]}, "moon_phase_pct": $moon_phase, "sunrise_time": "$sunrise", "sunset_time": "$sunset" }
 EOF
 )
 
