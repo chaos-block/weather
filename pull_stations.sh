@@ -4,7 +4,7 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
-LOG_FILE="${LOGS_DIR}/stations. log"
+LOG_FILE="${LOGS_DIR}/stations.log"
 mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
@@ -14,13 +14,13 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FIL
 LOOKBACK_HOURS=4
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
-TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H: 00:00Z')
+TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
 # Use temp file for atomic write
-TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}. jsonl. tmp"
-OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}. jsonl"
+TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}.jsonl.tmp"
+OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}Z.jsonl"
 > "$TEMP_FILE"
 
 log "Starting pull for ${HOUR_UTC}"
