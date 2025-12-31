@@ -14,7 +14,7 @@ cd "$(dirname "$0")"
 # Time window: previous completed hour (H-3 start → H-2 end)
 HOUR_START_UTC=$(date -u -d '3 hours ago' +"%Y-%m-%d %H:00:00")
 HOUR_END_UTC=$(date -u -d '2 hours ago' +"%Y-%m-%d %H:00:00")
-FILE_TS=$(date -u -d '3 hours ago' +"%Y%m%dT%H")Z
+FILE_TS=$(date -u -d '3 hours ago' +"%Y%m%dT%HZ")
 
 OUTPUT_FILE="${CURRENT_DIR}/ais_${FILE_TS}.jsonl"
 LOG_FILE="${LOGS_DIR}/ais.log"
