@@ -123,7 +123,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
             # Average speed for the hour
             vals[tide_speed_kts]=$(echo "$hour_data" | jq -r \
-              '[.[]. s | tonumber] | if length > 0 then (add / length) else null end')
+              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
             
             # Direction:  simple arithmetic mean
             vals[tide_dir_deg]=$(echo "$hour_data" | jq -r \
