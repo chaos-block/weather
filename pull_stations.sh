@@ -11,16 +11,29 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FIL
 
 # Calculate lookback time once
 # Set to 2 hours for real-time pulls (aligns with typical NOAA 2-hour latency)
-LOOKBACK_HOURS=2
-LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
+# Can be overridden by OVERRIDE_TIMESTAMP for historical pulls
+if [ -n "${OVERRIDE_TIMESTAMP:-}" ]; then
+  # Historical mode: use provided timestamp
+  TIMESTAMP="$OVERRIDE_TIMESTAMP"
+  LOOKBACK_DATE=$(date -u -d "$TIMESTAMP")
+else
+  # Real-time mode: use lookback
+  LOOKBACK_HOURS=2
+  LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
+  TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
+fi
+
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
-TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
+# Output directory can be overridden for historical pulls
+OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${CURRENT_DIR}}"
+mkdir -p "${OUTPUT_DIR}"
+
 # Use temp file for atomic write
-TEMP_FILE="${CURRENT_DIR}/.stations_${HOUR_UTC}Z.jsonl.tmp"
-OUTPUT_FILE="${CURRENT_DIR}/stations_${HOUR_UTC}Z.jsonl"
+TEMP_FILE="${OUTPUT_DIR}/.stations_${HOUR_UTC}Z.jsonl.tmp"
+OUTPUT_FILE="${OUTPUT_DIR}/stations_${HOUR_UTC}Z.jsonl"
 > "$TEMP_FILE"
 
 log "Starting pull for ${HOUR_UTC}"
@@ -279,7 +292,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
   esac
 
   # Construct JSON output with all fields (using jq for safety)
-  jq -n \
+  jq -nc \
     --arg station_id "$station_id" \
     --arg timestamp "$TIMESTAMP" \
     --argjson tide_height_ft "${vals[tide_height_ft]}" \

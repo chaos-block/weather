@@ -11,15 +11,29 @@ set -euo pipefail
 source conf.env || { echo "Error: conf.env not found. Copy conf.env.example to conf.env and populate API key."; exit 1; }
 cd "$(dirname "$0")"
 
-# Time window: previous completed hour (H-3 start → H-2 end)
-HOUR_START_UTC=$(date -u -d '3 hours ago' +"%Y-%m-%d %H:00:00")
-HOUR_END_UTC=$(date -u -d '2 hours ago' +"%Y-%m-%d %H:00:00")
-FILE_TS=$(date -u -d '3 hours ago' +"%Y%m%dT%HZ")
+# Calculate time window for AIS pull
+# Can be overridden by OVERRIDE_TIMESTAMP for historical pulls
+if [ -n "${OVERRIDE_TIMESTAMP:-}" ]; then
+  # Historical mode: use provided timestamp
+  TIMESTAMP="$OVERRIDE_TIMESTAMP"
+  LOOKBACK_DATE=$(date -u -d "$TIMESTAMP")
+  # For AIS, we need a 1-hour window
+  HOUR_START_UTC=$(date -u -d "$LOOKBACK_DATE" +"%Y-%m-%d %H:00:00")
+  HOUR_END_UTC=$(date -u -d "$LOOKBACK_DATE + 1 hour" +"%Y-%m-%d %H:00:00")
+  FILE_TS=$(date -u -d "$LOOKBACK_DATE" +"%Y%m%dT%HZ")
+else
+  # Real-time mode: previous completed hour (H-3 → H-2)
+  HOUR_START_UTC=$(date -u -d '3 hours ago' +"%Y-%m-%d %H:00:00")
+  HOUR_END_UTC=$(date -u -d '2 hours ago' +"%Y-%m-%d %H:00:00")
+  FILE_TS=$(date -u -d '3 hours ago' +"%Y%m%dT%HZ")
+fi
 
-OUTPUT_FILE="${CURRENT_DIR}/ais_${FILE_TS}.jsonl"
+# Output directory can be overridden for historical pulls
+OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${CURRENT_DIR}}"
+mkdir -p "$OUTPUT_DIR" "$LOGS_DIR"
+
+OUTPUT_FILE="${OUTPUT_DIR}/ais_${FILE_TS}.jsonl"
 LOG_FILE="${LOGS_DIR}/ais.log"
-
-mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ais: $1" | tee -a "$LOG_FILE"; }
 
