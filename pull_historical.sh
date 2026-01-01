@@ -387,6 +387,7 @@ lat_max = ${LAT_MAX}
 lon_min = ${LON_MIN}
 lon_max = ${LON_MAX}
 resolution = 0.004
+remove_nulls = "${REMOVE_NULLS}" == "no-nulls"
 
 lats = np.arange(lat_min, lat_max, resolution)
 lons = np.arange(lon_min, lon_max, resolution)
@@ -397,8 +398,9 @@ for lat in lats:
             'lat': round(lat, 6),
             'lon': round(lon, 6),
             'timestamp': '${timestamp}',
-            'reflectivity_dbz': None
         }
+        if not remove_nulls:
+            record['reflectivity_dbz'] = None
         print(json.dumps(record))
 PY
 }
