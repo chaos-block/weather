@@ -76,7 +76,7 @@ case "$MODE" in
       log "ERROR: Invalid START_DATE format: $START_DATE"
       exit 1
     }
-    END_EPOCH=$(date -u -d "$END_DATE 23:59:59" +%s 2>/dev/null) || {
+    END_EPOCH=$(date -u -d "$END_DATE + 1 day" +%s 2>/dev/null) || {
       log "ERROR: Invalid END_DATE format: $END_DATE"
       exit 1
     }
