@@ -470,9 +470,9 @@ while [ "$(date -d "$current_date" +%s)" -lt "$END_EPOCH" ]; do
     date_yyyymmdd=$(date -d "$current_date" +%Y%m%d)
     
     # Pull all 24 hours for this day
-    for hour in {00..23}; do
-        hour_utc="${date_yyyymmdd}T$(printf %02d $hour)"
-        timestamp="${current_date}T$(printf %02d $hour):00:00Z"
+    for hour in $(seq -w 0 23); do
+        hour_utc="${date_yyyymmdd}T${hour}"
+        timestamp="${current_date}T${hour}:00:00Z"
         
         # Skip if already in checkpoint
         if [ "${completed_hours[$hour_utc]:-0}" != "1" ]; then
@@ -486,10 +486,10 @@ while [ "$(date -d "$current_date" +%s)" -lt "$END_EPOCH" ]; do
         fi
     done
     
-    # Count records for this day
-    stations_count=$(find "${HISTORICAL_DIR}" -name "stations_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
-    radar_count=$(find "${HISTORICAL_DIR}" -name "radar_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
-    ais_count=$(find "${HISTORICAL_DIR}" -name "ais_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
+    # Count records for this day (efficiently without reading full files)
+    stations_count=$(find "${HISTORICAL_DIR}" -name "stations_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+    radar_count=$(find "${HISTORICAL_DIR}" -name "radar_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+    ais_count=$(find "${HISTORICAL_DIR}" -name "ais_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
     
     log "  Stations: ${stations_count:-0} records"
     log "  Radar: ${radar_count:-0} points"
@@ -518,8 +518,9 @@ log "============ VERIFICATION COMPLETE ============"
 log "${TOTAL_DAYS}-day historical pull SUCCESSFUL"
 
 # Count total stations dynamically
-total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -c '^[A-Z0-9-]')
-total_stations=$(find "${HISTORICAL_DIR}" -name "stations_*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
+total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -cE '^[A-Z0-9-]+')
+# Count total station records efficiently
+total_stations=$(find "${HISTORICAL_DIR}" -name "stations_*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
 log "Total: ${TOTAL_DAYS} days × ${total_station_count} stations = ${total_stations:-0} station records (nulls removed)"
 
 archives=$(find "${ARCHIVE_DIR}" -maxdepth 1 -name "*.tar.zst" -type f 2>/dev/null | wc -l)
