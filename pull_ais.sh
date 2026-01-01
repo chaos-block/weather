@@ -28,8 +28,9 @@ else
   FILE_TS=$(date -u -d '3 hours ago' +"%Y%m%dT%HZ")
 fi
 
-# Output directory can be overridden for historical pulls
-OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${CURRENT_DIR}}"
+# Output to /data/YYYY/ directory (new architecture)
+YEAR=$(date -u -d "$LOOKBACK_DATE" +%Y)
+OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${DATA_DIR}/${YEAR}}"
 mkdir -p "$OUTPUT_DIR" "$LOGS_DIR"
 
 OUTPUT_FILE="${OUTPUT_DIR}/ais_${FILE_TS}.jsonl"

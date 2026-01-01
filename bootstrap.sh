@@ -1,118 +1,140 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO_URL="https://github.com/chaos-block/weather.git"
-RUN_DIR="$(pwd)"  # Persistent directory where bootstrap is run
+# =============================================================================
+# bootstrap.sh – Main orchestration script for weather data collection
+# Simplified architecture with /data/YYYY/ structure
+# Modes:
+#   ./bootstrap.sh                                      # Default: pull last 72 hours (all 3 products)
+#   ./bootstrap.sh verify                               # Verify last 14 days
+#   ./bootstrap.sh verify 7                             # Verify last 7 days
+#   ./bootstrap.sh verify 2025-12-01 2025-12-31         # Verify date range
+#   ./bootstrap.sh bundle                               # Bundle previous month
+#   ./bootstrap.sh bundle 2025-12                       # Bundle specific month
+# =============================================================================
+
+cd "$(dirname "$0")"
+
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-LOG_DIR="${RUN_DIR}/logs"
+LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/bootstrap_${TIMESTAMP}.log"
 
 mkdir -p "$LOG_DIR"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1" | tee -a "$LOG_FILE"; }
 
-log "Minimal bootstrap started – fresh fetch"
-
-# Fresh temp workspace
-WORK_DIR=$(mktemp -d /tmp/weather.XXXXXX)
-log "Cloning fresh repo to $WORK_DIR"
-git clone "$REPO_URL" "$WORK_DIR"
-
-# Load persistent local conf.env (custom tokens preserved)
-if [ -f "$RUN_DIR/conf.env" ]; then
-    cp "$RUN_DIR/conf.env" "$WORK_DIR/conf.env"
-    log "Loaded local persistent conf.env"
-else
-    log "ERROR: No local conf.env in $RUN_DIR – create from conf.env.example"
+# Load configuration
+if [ ! -f "conf.env" ]; then
+    log "ERROR: No conf.env found – create from conf.env.example"
     exit 1
 fi
 
-cd "$WORK_DIR"
-
-chmod +x pull_stations.sh pull_radar.sh pull_ais.sh pull_historical.sh archive.sh 2>/dev/null || true
-log "Ensured script executables"
-
 source conf.env
 
-mkdir -p "${CURRENT_DIR}" "${ARCHIVE_DIR}"
+# Ensure scripts are executable
+chmod +x pull_stations.sh pull_radar.sh pull_ais.sh bundle.sh verify.sh 2>/dev/null || true
 
-log "Bootstrap complete – fresh scripts in $WORK_DIR"
-log "Run pulls manually: ./pull_stations.sh (stations), ./pull_radar.sh (radar), ./pull_ais.sh (AIS)"
-log "Data outputs: /data/current/*.jsonl (last 72h)"
+MODE="${1:-default}"
 
-# Optional auto-execution
-MODE="${1:-}"
-if [ "$MODE" = "1" ]; then
-    log "Auto-running stations only (mode 1)"
-    ./pull_stations.sh
-elif [ "$MODE" = "2" ]; then
-    log "Auto-running radar only (mode 2)"
-    ./pull_radar.sh
-elif [ "$MODE" = "all" ]; then
-    log "Auto-running all pulls"
-    ./pull_stations.sh && ./pull_radar.sh && ./pull_ais.sh
-elif [ "$MODE" = "historical" ]; then
-    # historical N - Pull last N days
-    DAYS="${2:-3}"
-    START_DATE=$(date -u -d "${DAYS} days ago" +%Y-%m-%d)
-    END_DATE=$(date -u +%Y-%m-%d)
-    log "Running historical pull for last ${DAYS} days (${START_DATE} → ${END_DATE})"
-    ./pull_historical.sh "$START_DATE" "$END_DATE" no-nulls
-elif [ "$MODE" = "historical_range" ]; then
-    # historical_range START END - Custom date range
-    if [ $# -lt 3 ]; then
-        log "ERROR: historical_range requires START_DATE and END_DATE"
-        log "Usage: $0 historical_range YYYY-MM-DD YYYY-MM-DD [no-nulls]"
-        exit 1
-    fi
-    START_DATE="$2"
-    END_DATE="$3"
-    NULLS_FLAG="${4:-no-nulls}"
-    log "Running historical pull for custom range (${START_DATE} → ${END_DATE})"
-    ./pull_historical.sh "$START_DATE" "$END_DATE" "$NULLS_FLAG"
-elif [ "$MODE" = "historical_full" ]; then
-    # historical_full - Full archive from 2015 to present
-    START_DATE="2015-01-01"
-    END_DATE=$(date -u +%Y-%m-%d)
-    log "WARNING: Running FULL historical pull from 2015 to present"
-    log "This will take several days/weeks to complete"
-    read -p "Are you sure? (yes/no) " -r
-    echo
-    if [[ $REPLY =~ ^yes$ ]]; then
-        log "Starting full historical pull (${START_DATE} → ${END_DATE})"
-        ./pull_historical.sh "$START_DATE" "$END_DATE" no-nulls
+case "$MODE" in
+  verify)
+    log "Starting verification mode"
+    if [ $# -eq 1 ]; then
+      # Default: last 14 days
+      ./verify.sh
+    elif [ $# -eq 2 ]; then
+      # Verify last N days
+      ./verify.sh "$2"
+    elif [ $# -eq 3 ]; then
+      # Verify date range
+      ./verify.sh "$2" "$3"
     else
-        log "Full historical pull cancelled"
+      log "ERROR: Invalid arguments for verify mode"
+      log "Usage: $0 verify [DAYS | START_DATE END_DATE]"
+      exit 1
     fi
-elif [ "$MODE" = "verify" ]; then
-    # verify START END - Audit data completeness
-    if [ $# -lt 3 ]; then
-        log "ERROR: verify requires START_DATE and END_DATE"
-        log "Usage: $0 verify YYYY-MM-DD YYYY-MM-DD"
-        exit 1
+    ;;
+    
+  bundle)
+    log "Starting bundle mode"
+    if [ $# -eq 1 ]; then
+      # Bundle previous month
+      ./bundle.sh
+    elif [ $# -eq 2 ]; then
+      # Bundle specific month
+      ./bundle.sh "$2"
+    else
+      log "ERROR: Invalid arguments for bundle mode"
+      log "Usage: $0 bundle [YYYY-MM]"
+      exit 1
     fi
-    START_DATE="$2"
-    END_DATE="$3"
-    log "Running data verification for (${START_DATE} → ${END_DATE})"
+    ;;
     
-    # Verification script - check existing data
-    current_date="$START_DATE"
-    END_EPOCH=$(date -d "$END_DATE" +%s)
+  default)
+    log "Minimal bootstrap started"
+    log "Running all pulls for last 72 hours"
     
-    while [ "$(date -d "$current_date" +%s)" -lt "$END_EPOCH" ]; do
-        date_yyyymmdd=$(date -d "$current_date" +%Y%m%d)
-        
-        # Check station files (efficiently)
-        stations_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "stations_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-        radar_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "radar_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-        ais_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "ais_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-        
-        log "${current_date}: Stations=${stations_count:-0} Radar=${radar_count:-0} AIS=${ais_count:-0}"
-        
-        # Move to next day
-        current_date=$(date -d "$current_date + 1 day" +%Y-%m-%d)
+    # Helper function to pull data for a specific hour
+    pull_hour() {
+      local HOUR_TIMESTAMP="$1"
+      local HOUR_UTC="$2"
+      local PRODUCT="$3"
+      
+      if ! OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh"; then
+        log "WARNING: ${PRODUCT^} pull failed for $HOUR_UTC"
+      fi
+    }
+    
+    # Calculate date range for last 72 hours
+    END_HOUR=$(date -u +%Y-%m-%dT%H:00:00Z)
+    START_HOUR=$(date -u -d '72 hours ago' +%Y-%m-%dT%H:00:00Z)
+    
+    log "Data range: $START_HOUR → $END_HOUR"
+    
+    # Pull data for each hour in the last 72 hours
+    CURRENT_EPOCH=$(date -u -d "$START_HOUR" +%s)
+    END_EPOCH=$(date -u -d "$END_HOUR" +%s)
+    
+    HOURS_COMPLETED=0
+    TOTAL_HOURS=72
+    
+    while [ $CURRENT_EPOCH -lt $END_EPOCH ]; do
+      HOUR_TIMESTAMP=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%dT%H:00:00Z)
+      HOUR_UTC=$(date -u -d "@$CURRENT_EPOCH" +%Y%m%dT%H)
+      YEAR=$(date -u -d "@$CURRENT_EPOCH" +%Y)
+      
+      log "Starting pull for ${HOUR_UTC}"
+      log "Data directory: ${DATA_DIR}/${YEAR}/"
+      
+      # Pull stations, radar, and AIS for this hour
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "stations"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "radar"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "ais"
+      
+      ((HOURS_COMPLETED++))
+      
+      # Log progress every 12 hours
+      if [ $((HOURS_COMPLETED % 12)) -eq 0 ]; then
+        log "Progress: ${HOURS_COMPLETED}/${TOTAL_HOURS} hours completed"
+      fi
+      
+      # Move to next hour
+      CURRENT_EPOCH=$((CURRENT_EPOCH + 3600))
     done
     
-    log "Verification complete"
-fi
+    log "All pulls complete"
+    log "Data stored in: ${DATA_DIR}/YYYY/ (no subdirectories)"
+    ;;
+    
+  *)
+    log "ERROR: Unknown mode: $MODE"
+    log "Usage: $0 [verify|bundle|default]"
+    log "  default  - Pull last 72 hours (all 3 products)"
+    log "  verify   - Verify data completeness"
+    log "  bundle   - Bundle monthly data"
+    exit 1
+    ;;
+esac
+
+log "Bootstrap complete"
 
