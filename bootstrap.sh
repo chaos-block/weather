@@ -74,6 +74,17 @@ case "$MODE" in
     log "Minimal bootstrap started"
     log "Running all pulls for last 72 hours"
     
+    # Helper function to pull data for a specific hour
+    pull_hour() {
+      local HOUR_TIMESTAMP="$1"
+      local HOUR_UTC="$2"
+      local PRODUCT="$3"
+      
+      if ! OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh"; then
+        log "WARNING: ${PRODUCT^} pull failed for $HOUR_UTC"
+      fi
+    }
+    
     # Calculate date range for last 72 hours
     END_HOUR=$(date -u +%Y-%m-%dT%H:00:00Z)
     START_HOUR=$(date -u -d '72 hours ago' +%Y-%m-%dT%H:00:00Z)
@@ -96,9 +107,9 @@ case "$MODE" in
       log "Data directory: ${DATA_DIR}/${YEAR}/"
       
       # Pull stations, radar, and AIS for this hour
-      OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" ./pull_stations.sh || log "WARNING: Stations pull failed for $HOUR_UTC"
-      OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" ./pull_radar.sh || log "WARNING: Radar pull failed for $HOUR_UTC"
-      OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" ./pull_ais.sh || log "WARNING: AIS pull failed for $HOUR_UTC"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "stations"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "radar"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "ais"
       
       ((HOURS_COMPLETED++))
       

@@ -53,7 +53,17 @@ log "Found $FILE_COUNT files to bundle"
 BUNDLE_FILE="${DATA_DIR}/${YEAR}/${MONTH}.tar.zst"
 
 # Create tar with basenames only (files are already in the correct directory)
-echo "$FILES" | xargs -n1 basename | tar -C "${DATA_DIR}/${YEAR}" -cf - -T - | zstd -19 -o "$BUNDLE_FILE"
+# Use intermediate file list for better error handling
+FILELIST=$(mktemp)
+echo "$FILES" | xargs -n1 basename > "$FILELIST"
+
+if ! tar -C "${DATA_DIR}/${YEAR}" -cf - -T "$FILELIST" | zstd -19 -o "$BUNDLE_FILE"; then
+  log "ERROR: Failed to create bundle"
+  rm -f "$FILELIST"
+  exit 1
+fi
+
+rm -f "$FILELIST"
 
 if [ ! -f "$BUNDLE_FILE" ]; then
   log "ERROR: Bundle file creation failed"

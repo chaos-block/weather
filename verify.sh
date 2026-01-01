@@ -34,14 +34,15 @@ fi
 
 log "Verifying data from $START_DATE to $END_DATE"
 
-CURRENT_DATE="$START_DATE"
+CURRENT_EPOCH=$(date -d "$START_DATE" +%s)
 END_EPOCH=$(date -d "$END_DATE" +%s)
 
 TOTAL_RECORDS=0
 
-while [ "$(date -d "$CURRENT_DATE" +%s)" -lt "$END_EPOCH" ]; do
-  DATE_YYYYMMDD=$(date -d "$CURRENT_DATE" +%Y%m%d)
-  YEAR=$(date -d "$CURRENT_DATE" +%Y)
+while [ "$CURRENT_EPOCH" -lt "$END_EPOCH" ]; do
+  CURRENT_DATE=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%d)
+  DATE_YYYYMMDD=$(date -d "@$CURRENT_EPOCH" +%Y%m%d)
+  YEAR=$(date -d "@$CURRENT_EPOCH" +%Y)
   
   log "Verifying $CURRENT_DATE"
   
@@ -77,7 +78,12 @@ while [ "$(date -d "$CURRENT_DATE" +%s)" -lt "$END_EPOCH" ]; do
         # Check for expected fields that are missing
         # Parse expected fields and check each one
         if [ -n "$expected_fields" ]; then
-          IFS=',' read -ra FIELDS <<< "$expected_fields"
+          # Save IFS and restore after splitting
+          OLD_IFS="$IFS"
+          IFS=','
+          read -ra FIELDS <<< "$expected_fields"
+          IFS="$OLD_IFS"
+          
           for field in "${FIELDS[@]}"; do
             if ! echo "$record" | jq -e ".$field" >/dev/null 2>&1; then
               log "    WARNING: $field missing for $station_id (expected but got nothing)"
@@ -91,7 +97,7 @@ while [ "$(date -d "$CURRENT_DATE" +%s)" -lt "$END_EPOCH" ]; do
   done
   
   # Move to next day
-  CURRENT_DATE=$(date -d "$CURRENT_DATE + 1 day" +%Y-%m-%d)
+  CURRENT_EPOCH=$((CURRENT_EPOCH + 86400))
 done
 
 log "✅ Verification complete"

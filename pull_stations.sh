@@ -86,8 +86,8 @@ check_field() {
   local field_value="$3"
   local expected_fields="$4"
   
-  # Check if this field is expected for this station
-  if echo "$expected_fields" | grep -q "$field_name"; then
+  # Check if this field is expected for this station (use word boundaries)
+  if echo "$expected_fields" | grep -qw "$field_name"; then
     # Field is expected - check if it's null or empty
     if [ "$field_value" = "null" ] || [ -z "$field_value" ]; then
       log "WARNING: $field_name missing for $station_id (expected but got nothing)"
