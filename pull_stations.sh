@@ -10,8 +10,8 @@ mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
 
 # Calculate lookback time once
-# INCREASED TO 4 HOURS:  NOAA observed water level data has 2-4 hour publication latency
-LOOKBACK_HOURS=4
+# Set to 2 hours for real-time pulls (aligns with typical NOAA 2-hour latency)
+LOOKBACK_HOURS=2
 LOOKBACK_DATE=$(date -u -d "$LOOKBACK_HOURS hours ago")
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
 TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H:00:00Z')
@@ -278,13 +278,36 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       ;;
   esac
 
-  # Construct JSON output with all fields
-  json=$(cat <<EOF
-{ "station_id": "$station_id", "timestamp": "$TIMESTAMP", "tide_height_ft": ${vals[tide_height_ft]}, "tide_speed_kts": ${vals[tide_speed_kts]}, "tide_dir_deg": ${vals[tide_dir_deg]}, "visibility_mi": ${vals[visibility_mi]}, "cloud_pct": ${vals[cloud_pct]}, "wave_ht_ft": ${vals[wave_ht_ft]}, "wind_spd_kts": ${vals[wind_spd_kts]}, "wind_dir_deg": ${vals[wind_dir_deg]}, "moon_phase_pct": $moon_phase, "sunrise_time": "$sunrise", "sunset_time": "$sunset" }
-EOF
-)
-
-  echo "$json" >> "$TEMP_FILE"
+  # Construct JSON output with all fields (using jq for safety)
+  jq -n \
+    --arg station_id "$station_id" \
+    --arg timestamp "$TIMESTAMP" \
+    --argjson tide_height_ft "${vals[tide_height_ft]}" \
+    --argjson tide_speed_kts "${vals[tide_speed_kts]}" \
+    --argjson tide_dir_deg "${vals[tide_dir_deg]}" \
+    --argjson visibility_mi "${vals[visibility_mi]}" \
+    --argjson cloud_pct "${vals[cloud_pct]}" \
+    --argjson wave_ht_ft "${vals[wave_ht_ft]}" \
+    --argjson wind_spd_kts "${vals[wind_spd_kts]}" \
+    --argjson wind_dir_deg "${vals[wind_dir_deg]}" \
+    --argjson moon_phase_pct "$moon_phase" \
+    --arg sunrise "$sunrise" \
+    --arg sunset "$sunset" \
+    '{
+      station_id: $station_id,
+      timestamp: $timestamp,
+      tide_height_ft: $tide_height_ft,
+      tide_speed_kts: $tide_speed_kts,
+      tide_dir_deg: $tide_dir_deg,
+      visibility_mi: $visibility_mi,
+      cloud_pct: $cloud_pct,
+      wave_ht_ft: $wave_ht_ft,
+      wind_spd_kts: $wind_spd_kts,
+      wind_dir_deg: $wind_dir_deg,
+      moon_phase_pct: $moon_phase_pct,
+      sunrise_time: $sunrise,
+      sunset_time: $sunset
+    } | del(.[] | select(. == null))' >> "$TEMP_FILE"
 done
 
 # Atomic move to final location
