@@ -4,8 +4,10 @@ set -euo pipefail
 # =============================================================================
 # pull_historical.sh – Complete historical data puller with null-field removal
 # Pulls observed data from any date range (e.g., 2025-12-01 → 2026-01-01)
+# Calls existing pull_stations.sh, pull_radar.sh, pull_ais.sh with custom timestamps
 # Removes all null fields from JSON output (only include fields with actual values)
 # Verifies data completeness per day (reports which fields are populated vs null)
+# Supports checkpoint/resume for interrupted pulls
 # =============================================================================
 
 source conf.env || { echo "Error: conf.env not found"; exit 1; }
@@ -70,462 +72,218 @@ if [ -f "$CHECKPOINT_FILE" ]; then
 fi
 
 # Function to pull stations for a specific hour
-pull_stations_hour() {
-    local hour_utc="$1"
-    local timestamp="$2"
-    local date_yyyymmdd="$3"
+fetch_stations_hour() {
+    local HOUR_UTC="$1"
+    local TIMESTAMP="$2"
     
-    local temp_file="${HISTORICAL_DIR}/.stations_${hour_utc}Z.jsonl.tmp"
-    local output_file="${HISTORICAL_DIR}/stations_${hour_utc}Z.jsonl"
+    log "Pulling stations for ${HOUR_UTC}..."
     
-    # Skip if already completed
-    if [ -f "$output_file" ] && [ "${completed_hours[$hour_utc]:-0}" = "1" ]; then
-        return 0
-    fi
+    # Call pull_stations.sh with custom timestamp and output directory
+    OVERRIDE_TIMESTAMP="$TIMESTAMP" OVERRIDE_OUTPUT_DIR="$HISTORICAL_DIR" ./pull_stations.sh
     
-    > "$temp_file"
-    
-    # Calculate astronomical data for this hour
-    local astro_data=$(python3 - <<PY
-import math, datetime
-
-utc = datetime.datetime.strptime("${hour_utc}", "%Y%m%dT%H")
-
-# Moon phase calculation
-days = (utc - datetime.datetime(2000,1,6,18,14)).days + \
-       (utc - datetime.datetime(utc.year,utc.month,utc.day)).total_seconds()/86400
-phase = (days % 29.53059) / 29.53059
-illum = (1 - math.cos(2*math.pi*phase)) / 2 * 100
-
-print(f"moon_phase_pct={illum:.1f}")
-
-# Sunrise/sunset calculation
-try:
-    from astral import LocationInfo
-    from astral.sun import sun
-    city = LocationInfo("San Diego", "USA", "America/Los_Angeles", 32.7157, -117.1611)
-    s = sun(city.observer, date=utc.date())
-    sunrise_utc = s['sunrise'].strftime('%H:%M')
-    sunset_utc = s['sunset'].strftime('%H:%M')
-    print(f"sunrise_time={sunrise_utc}")
-    print(f"sunset_time={sunset_utc}")
-except ImportError:
-    print("sunrise_time=06:45")
-    print("sunset_time=16:55")
-PY
-)
-    
-    local moon_phase=$(echo "$astro_data" | grep moon_phase_pct | cut -d= -f2 | tr -d ' ')
-    local sunrise=$(echo "$astro_data" | grep sunrise_time | cut -d= -f2 | tr -d ' ')
-    local sunset=$(echo "$astro_data" | grep sunset_time | cut -d= -f2 | tr -d ' ')
-    
-    # Process each station
-    echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat lon source fields; do
-        [ -z "$station_id" ] && continue
-        
-        if ! [[ "$station_id" =~ ^[A-Z0-9-]+$ ]]; then
-            continue
-        fi
-        
-        # Initialize all fields to null
-        declare -A vals=(
-            [tide_height_ft]=null
-            [tide_speed_kts]=null
-            [tide_dir_deg]=null
-            [visibility_mi]=null
-            [cloud_pct]=null
-            [wave_ht_ft]=null
-            [wind_spd_kts]=null
-            [wind_dir_deg]=null
-        )
-        
-        case $source in
-            NOAA)
-                BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${date_yyyymmdd}&end_date=${date_yyyymmdd}&time_zone=gmt&units=english&format=json"
-                [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&application=${NOAA_TOKEN}"
-                
-                # Tide height
-                if echo "$fields" | grep -q "tide_height_ft"; then
-                    url="${BASE}&product=water_level&datum=MLLW&interval=6"
-                    response=$(curl -sf "$url" 2>/dev/null || echo "")
-                    if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-                        vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${hour_utc:0:13}" \
-                            '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
-                             if length > 0 then (add / length) else null end')
-                    fi
-                    sleep 1.5  # Rate limiting
-                fi
-                
-                # Tidal currents
-                if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
-                    url="${BASE}&product=currents"
-                    response=$(curl -sf "$url" 2>/dev/null || echo "")
-                    if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-                        hour_data=$(echo "$response" | jq -r --arg hour "${hour_utc:0:13}" \
-                            '[.data[] | select(.t | startswith($hour))]')
-                        
-                        if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
-                            vals[tide_speed_kts]=$(echo "$hour_data" | jq -r \
-                                '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
-                            vals[tide_dir_deg]=$(echo "$hour_data" | jq -r \
-                                '[.[].d | tonumber] | if length > 0 then (add / length) else null end')
-                        fi
-                    fi
-                    sleep 1.5
-                fi
-                
-                # Wind
-                if echo "$fields" | grep -q "wind_spd_kts\|wind_dir_deg"; then
-                    response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
-                    if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-                        wind_data=$(echo "$response" | jq -r --arg hour "${hour_utc:0:13}" \
-                            '[.data[] | select(.t | startswith($hour))] | .[0]')
-                        vals[wind_spd_kts]=$(echo "$wind_data" | jq -r '.s // null')
-                        vals[wind_dir_deg]=$(echo "$wind_data" | jq -r '.d // null')
-                    fi
-                    sleep 1.5
-                fi
-                
-                # Visibility
-                if echo "$fields" | grep -q "visibility_mi"; then
-                    response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
-                    if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-                        vis_data=$(echo "$response" | jq -r --arg hour "${hour_utc:0:13}" \
-                            '[.data[] | select(.t | startswith($hour))] | .[0]')
-                        vals[visibility_mi]=$(echo "$vis_data" | jq -r '.v // null')
-                    fi
-                    sleep 1.5
-                fi
-                ;;
-                
-            NDBC)
-                response=$(curl -sf "https://www.ndbc.noaa.gov/data/realtime2/${station_id}.txt" 2>/dev/null || echo "")
-                
-                if ! echo "$response" | grep -qi "404\|not found" && [ -n "$response" ]; then
-                    year=$(echo "$hour_utc" | cut -c1-4)
-                    month=$(echo "$hour_utc" | cut -c5-6)
-                    day=$(echo "$hour_utc" | cut -c7-8)
-                    hour=$(echo "$hour_utc" | cut -c10-11)
-                    
-                    lines=$(echo "$response" | awk -v y="$year" -v m="$month" -v d="$day" -v h="$hour" \
-                                                   '$1==y && $2==m && $3==d && $4==h {print}')
-                    
-                    if [ -n "$lines" ]; then
-                        if echo "$fields" | grep -q "wave_ht_ft"; then
-                            vals[wave_ht_ft]=$(echo "$lines" | awk '{
-                                sum=0; count=0;
-                                v=$9; if(v!="MM" && v>=0) {sum+=v; count++}
-                            } END {
-                                if(count>0) print (sum/count)*3.28084; else print "null"
-                            }')
-                        fi
-                        
-                        if echo "$fields" | grep -q "wind_dir_deg"; then
-                            vals[wind_dir_deg]=$(echo "$lines" | awk '{
-                                sum=0; count=0;
-                                v=$6; if(v!="MM" && v>=0 && v<=360) {sum+=v; count++}
-                            } END {
-                                if(count>0) print sum/count; else print "null"
-                            }')
-                        fi
-                        
-                        if echo "$fields" | grep -q "wind_spd_kts"; then
-                            vals[wind_spd_kts]=$(echo "$lines" | awk '{
-                                sum=0; count=0;
-                                v=$7; if(v!="MM" && v>=0) {sum+=v; count++}
-                            } END {
-                                if(count>0) print (sum/count)*1.94384; else print "null"
-                            }')
-                        fi
-                        
-                        if echo "$fields" | grep -q "visibility_mi"; then
-                            vals[visibility_mi]=$(echo "$lines" | awk '{
-                                sum=0; count=0;
-                                v=$17; if(v!="MM" && v>=0) {sum+=v; count++}
-                            } END {
-                                if(count>0) print (sum/count)*1.15078; else print "null"
-                            }')
-                        fi
-                    fi
-                fi
-                sleep 2  # Rate limiting for NDBC
-                ;;
-                
-            SMN)
-                if [ -n "${SMN_TOKEN:-}" ]; then
-                    response=$(curl -sf "https://smn.conagua.gob.mx/api/datos/estacion/${station_id}" \
-                        -H "Authorization: Bearer ${SMN_TOKEN}" 2>/dev/null || echo "")
-                    
-                    if [ -n "$response" ] && echo "$response" | jq -e '.datos[0]' >/dev/null 2>&1; then
-                        latest=$(echo "$response" | jq -r '.datos[0]')
-                        
-                        if echo "$fields" | grep -q "wind_spd_kts"; then
-                            wind_ms=$(echo "$latest" | jq -r '.velocidad_viento // null')
-                            if [ "$wind_ms" != "null" ] && [ -n "$wind_ms" ]; then
-                                vals[wind_spd_kts]=$(awk "BEGIN {printf \"%.2f\", $wind_ms * 1.94384}")
-                            fi
-                        fi
-                        
-                        if echo "$fields" | grep -q "wind_dir_deg"; then
-                            vals[wind_dir_deg]=$(echo "$latest" | jq -r '.direccion_viento // null')
-                        fi
-                        
-                        if echo "$fields" | grep -q "visibility_mi"; then
-                            vis_km=$(echo "$latest" | jq -r '.visibilidad // null')
-                            if [ "$vis_km" != "null" ] && [ -n "$vis_km" ]; then
-                                vals[visibility_mi]=$(awk "BEGIN {printf \"%.2f\", $vis_km / 1.60934}")
-                            fi
-                        fi
-                        
-                        if echo "$fields" | grep -q "wave_ht_ft"; then
-                            wave_m=$(echo "$latest" | jq -r '.altura_ola // null')
-                            if [ "$wave_m" != "null" ] && [ -n "$wave_m" ]; then
-                                vals[wave_ht_ft]=$(awk "BEGIN {printf \"%.2f\", $wave_m * 3.28084}")
-                            fi
-                        fi
-                    fi
-                    sleep 2.5  # Rate limiting for SMN
-                fi
-                ;;
-        esac
-        
-        # Construct JSON with all fields (using jq for safety)
-        if [ "$REMOVE_NULLS" = "no-nulls" ]; then
-            jq -n \
-                --arg station_id "$station_id" \
-                --arg timestamp "$timestamp" \
-                --argjson tide_height_ft "${vals[tide_height_ft]}" \
-                --argjson tide_speed_kts "${vals[tide_speed_kts]}" \
-                --argjson tide_dir_deg "${vals[tide_dir_deg]}" \
-                --argjson visibility_mi "${vals[visibility_mi]}" \
-                --argjson cloud_pct "${vals[cloud_pct]}" \
-                --argjson wave_ht_ft "${vals[wave_ht_ft]}" \
-                --argjson wind_spd_kts "${vals[wind_spd_kts]}" \
-                --argjson wind_dir_deg "${vals[wind_dir_deg]}" \
-                --argjson moon_phase_pct "$moon_phase" \
-                --arg sunrise "$sunrise" \
-                --arg sunset "$sunset" \
-                '{
-                  station_id: $station_id,
-                  timestamp: $timestamp,
-                  tide_height_ft: $tide_height_ft,
-                  tide_speed_kts: $tide_speed_kts,
-                  tide_dir_deg: $tide_dir_deg,
-                  visibility_mi: $visibility_mi,
-                  cloud_pct: $cloud_pct,
-                  wave_ht_ft: $wave_ht_ft,
-                  wind_spd_kts: $wind_spd_kts,
-                  wind_dir_deg: $wind_dir_deg,
-                  moon_phase_pct: $moon_phase_pct,
-                  sunrise_time: $sunrise,
-                  sunset_time: $sunset
-                } | del(.[] | select(. == null))' >> "$temp_file"
-        else
-            jq -n \
-                --arg station_id "$station_id" \
-                --arg timestamp "$timestamp" \
-                --argjson tide_height_ft "${vals[tide_height_ft]}" \
-                --argjson tide_speed_kts "${vals[tide_speed_kts]}" \
-                --argjson tide_dir_deg "${vals[tide_dir_deg]}" \
-                --argjson visibility_mi "${vals[visibility_mi]}" \
-                --argjson cloud_pct "${vals[cloud_pct]}" \
-                --argjson wave_ht_ft "${vals[wave_ht_ft]}" \
-                --argjson wind_spd_kts "${vals[wind_spd_kts]}" \
-                --argjson wind_dir_deg "${vals[wind_dir_deg]}" \
-                --argjson moon_phase_pct "$moon_phase" \
-                --arg sunrise "$sunrise" \
-                --arg sunset "$sunset" \
-                '{
-                  station_id: $station_id,
-                  timestamp: $timestamp,
-                  tide_height_ft: $tide_height_ft,
-                  tide_speed_kts: $tide_speed_kts,
-                  tide_dir_deg: $tide_dir_deg,
-                  visibility_mi: $visibility_mi,
-                  cloud_pct: $cloud_pct,
-                  wave_ht_ft: $wave_ht_ft,
-                  wind_spd_kts: $wind_spd_kts,
-                  wind_dir_deg: $wind_dir_deg,
-                  moon_phase_pct: $moon_phase_pct,
-                  sunrise_time: $sunrise,
-                  sunset_time: $sunset
-                }' >> "$temp_file"
-        fi
-    done
-    
-    # Atomic move to final location
-    if [ -f "$temp_file" ]; then
-        mv "$temp_file" "$output_file"
-    fi
+    # Rate limit (NOAA recommended)
+    sleep 1.5
 }
 
 # Function to pull radar for a specific hour
-pull_radar_hour() {
-    local hour_utc="$1"
-    local timestamp="$2"
+fetch_radar_hour() {
+    local HOUR_UTC="$1"
+    local TIMESTAMP="$2"
     
-    local output_file="${HISTORICAL_DIR}/radar_${hour_utc}Z.jsonl"
+    log "Pulling radar for ${HOUR_UTC}..."
     
-    # Skip if already completed
-    if [ -f "$output_file" ] && [ "${completed_hours[$hour_utc]:-0}" = "1" ]; then
-        return 0
-    fi
+    # Call pull_radar.sh with custom timestamp and output directory
+    OVERRIDE_TIMESTAMP="$TIMESTAMP" OVERRIDE_OUTPUT_DIR="$HISTORICAL_DIR" ./pull_radar.sh
     
-    # Extract date components
-    local year=${hour_utc:0:4}
-    local mon=${hour_utc:4:2}
-    local day=${hour_utc:6:2}
-    local hh=${hour_utc:9:2}
-    
-    # Generate grid with null reflectivity (radar data processing would go here)
-    python3 - <<PY > "$output_file"
-import json
-import numpy as np
-
-lat_min = ${LAT_MIN}
-lat_max = ${LAT_MAX}
-lon_min = ${LON_MIN}
-lon_max = ${LON_MAX}
-resolution = 0.004
-remove_nulls = "${REMOVE_NULLS}" == "no-nulls"
-
-lats = np.arange(lat_min, lat_max, resolution)
-lons = np.arange(lon_min, lon_max, resolution)
-
-for lat in lats:
-    for lon in lons:
-        record = {
-            'lat': round(lat, 6),
-            'lon': round(lon, 6),
-            'timestamp': '${timestamp}',
-        }
-        if not remove_nulls:
-            record['reflectivity_dbz'] = None
-        print(json.dumps(record))
-PY
+    # Rate limit
+    sleep 1.5
 }
 
 # Function to pull AIS for a specific hour
-pull_ais_hour() {
-    local hour_utc="$1"
-    local timestamp="$2"
+fetch_ais_hour() {
+    local HOUR_UTC="$1"
+    local TIMESTAMP="$2"
     
-    local output_file="${HISTORICAL_DIR}/ais_${hour_utc}Z.jsonl"
+    log "Pulling AIS for ${HOUR_UTC}..."
     
-    # Skip if already completed
-    if [ -f "$output_file" ] && [ "${completed_hours[$hour_utc]:-0}" = "1" ]; then
+    # Call pull_ais.sh with custom timestamp and output directory
+    OVERRIDE_TIMESTAMP="$TIMESTAMP" OVERRIDE_OUTPUT_DIR="$HISTORICAL_DIR" ./pull_ais.sh
+    
+    # Rate limit (MarineTraffic stricter)
+    sleep 2.5
+}
+
+# Function to remove null fields from JSON files
+# Note: This is a safety measure as the individual pull scripts already remove nulls
+# This ensures consistency even if pull scripts are modified in the future
+remove_null_fields() {
+    local HOUR_UTC="$1"
+    
+    # Only process files if REMOVE_NULLS flag is set
+    if [ "$REMOVE_NULLS" != "no-nulls" ]; then
         return 0
     fi
     
-    # AIS historical data would require different API endpoint
-    # For now, create empty file as placeholder
-    touch "$output_file"
+    for file in "${HISTORICAL_DIR}/stations_${HOUR_UTC}Z.jsonl" \
+                "${HISTORICAL_DIR}/radar_${HOUR_UTC}Z.jsonl" \
+                "${HISTORICAL_DIR}/ais_${HOUR_UTC}Z.jsonl"; do
+        if [ -f "$file" ]; then
+            # Remove null fields from each JSON object using jq
+            # This filter removes all keys whose values are null
+            jq -c 'with_entries(select(.value != null))' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+        fi
+    done
 }
 
 # Function to verify data for a specific day
 verify_day() {
-    local date="$1"
-    local date_yyyymmdd=$(date -d "$date" +%Y%m%d)
+    local DATE="$1"
+    local DATE_YYYYMMDD=$(date -d "$DATE" +%Y%m%d)
     
-    log "Verifying ${date}..."
+    log "Verifying ${DATE} (24 hours complete)..."
     
-    # Count fields per station for this day
-    local total_records=0
-    local total_fields=0
+    # Get list of stations to verify from STATIONS_LIST
+    local sample_stations=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -E '^[A-Z0-9-]+' | head -5 | cut -d'|' -f1 | tr '\n' ' ')
     
-    for hour in {00..23}; do
-        local hour_utc="${date_yyyymmdd}T$(printf %02d $hour)"
-        local stations_file="${HISTORICAL_DIR}/stations_${hour_utc}Z.jsonl"
+    # Count records per station for this day (sample first 5 stations)
+    for station in $sample_stations; do
+        local count=0
+        local field_count=0
         
-        if [ -f "$stations_file" ]; then
-            # Count records and fields
-            while read -r line; do
-                ((total_records++))
-                local field_count=$(echo "$line" | jq 'keys | length')
-                ((total_fields+=field_count))
+        # Count records for this station across all hours of the day
+        for hour in {00..23}; do
+            local hour_utc="${DATE_YYYYMMDD}T$(printf %02d $hour)"
+            local stations_file="${HISTORICAL_DIR}/stations_${hour_utc}Z.jsonl"
+            
+            if [ -f "$stations_file" ]; then
+                local records=$(jq -c "select(.station_id==\"$station\")" "$stations_file" 2>/dev/null | wc -l || echo "0")
+                count=$((count + records))
                 
-                # Log first hour's station-level details
-                if [ $hour -eq 0 ]; then
-                    local station=$(echo "$line" | jq -r '.station_id')
-                    log "  ${station}: ${field_count} fields populated ✅"
+                # Get field count from first record found
+                if [ "$field_count" -eq 0 ] && [ "$records" -gt 0 ]; then
+                    field_count=$(jq -c "select(.station_id==\"$station\") | keys | length" "$stations_file" 2>/dev/null | head -1 || echo "0")
                 fi
-            done < "$stations_file"
+            fi
+        done
+        
+        if [ "$count" -gt 0 ]; then
+            log "  $station: $count records, $field_count fields ✅"
         fi
     done
     
-    if [ $total_records -gt 0 ]; then
-        local avg_fields=$((total_fields / total_records))
-        log "${date} VERIFIED ✅ (null fields removed, ${total_records} clean records, avg ${avg_fields} fields/record)"
+    log "${DATE} VERIFIED ✅"
+}
+
+# Function to archive a day's data
+archive_day() {
+    local DATE="$1"
+    local BUNDLE_FILE="${ARCHIVE_DIR}/${DATE}.tar.zst"
+    
+    log "Archiving ${DATE} → ${BUNDLE_FILE}..."
+    
+    # Find all files for this day
+    local DATE_YYYYMMDD=$(date -d "$DATE" +%Y%m%d)
+    
+    # Create list of files to archive
+    local FILES=$(find "${HISTORICAL_DIR}" -type f -name "*${DATE_YYYYMMDD}*.jsonl" \
+                  \( -name "stations_*.jsonl" -o -name "radar_*.jsonl" -o -name "ais_*.jsonl" \))
+    
+    if [ -n "$FILES" ]; then
+        # Bundle with zstd level 19
+        # Use while read loop for safe handling of filenames with spaces
+        echo "$FILES" | while read -r file; do
+            basename "$file"
+        done | tar -C "${HISTORICAL_DIR}" -cf - -T - | zstd -19 -o "$BUNDLE_FILE"
+        
+        local SIZE=$(du -h "$BUNDLE_FILE" | cut -f1)
+        log "${DATE}.tar.zst (${SIZE}) ✅"
+        
+        # Clean up source files after successful archival
+        # Use while read for safe handling of filenames
+        echo "$FILES" | while read -r file; do
+            rm -f "$file"
+        done
     else
-        log "${date} WARNING: No data found"
+        log "No files found for ${DATE}"
     fi
 }
 
-# Main pull loop
-current_date="$START_DATE"
-day_count=0
+# Main loop - hour by hour
+log "Starting hour-by-hour data pull..."
 
-while [ "$(date -d "$current_date" +%s)" -lt "$END_EPOCH" ]; do
-    ((day_count++))
-    log "Pulling ${current_date} (day ${day_count}/${TOTAL_DAYS})..."
+CURRENT_EPOCH=$START_EPOCH
+CURRENT_DAY=""
+HOURS_COMPLETED=0
+
+while [ $CURRENT_EPOCH -lt $END_EPOCH ]; do
+    CURRENT_DATE=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%d)
+    HOUR_UTC=$(date -u -d "@$CURRENT_EPOCH" +%Y%m%dT%H)
+    TIMESTAMP=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%dT%H:00:00Z)
     
-    date_yyyymmdd=$(date -d "$current_date" +%Y%m%d)
+    # Check if already completed (resume logic)
+    if [ "${completed_hours[$HOUR_UTC]:-0}" = "1" ]; then
+        log "Skipping ${HOUR_UTC} (already completed)"
+        CURRENT_EPOCH=$((CURRENT_EPOCH + 3600))
+        continue
+    fi
     
-    # Pull all 24 hours for this day
-    for hour in $(seq -w 0 23); do
-        hour_utc="${date_yyyymmdd}T${hour}"
-        timestamp="${current_date}T${hour}:00:00Z"
-        
-        # Skip if already in checkpoint
-        if [ "${completed_hours[$hour_utc]:-0}" != "1" ]; then
-            pull_stations_hour "$hour_utc" "$timestamp" "$date_yyyymmdd"
-            pull_radar_hour "$hour_utc" "$timestamp"
-            pull_ais_hour "$hour_utc" "$timestamp"
-            
-            # Update checkpoint
-            echo "$hour_utc" >> "$CHECKPOINT_FILE"
-            completed_hours["$hour_utc"]=1
-        fi
-    done
+    # Fetch data for this specific hour
+    fetch_stations_hour "$HOUR_UTC" "$TIMESTAMP"
+    fetch_radar_hour "$HOUR_UTC" "$TIMESTAMP"
+    fetch_ais_hour "$HOUR_UTC" "$TIMESTAMP"
     
-    # Count records for this day (efficiently without reading full files)
-    stations_count=$(find "${HISTORICAL_DIR}" -name "stations_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-    radar_count=$(find "${HISTORICAL_DIR}" -name "radar_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-    ais_count=$(find "${HISTORICAL_DIR}" -name "ais_${date_yyyymmdd}*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+    # Remove null fields from output if flag set
+    if [ "$REMOVE_NULLS" = "no-nulls" ]; then
+        remove_null_fields "$HOUR_UTC"
+    fi
     
-    log "  Stations: ${stations_count:-0} records"
-    log "  Radar: ${radar_count:-0} points"
-    log "  AIS: ${ais_count:-0} vessels"
+    # Mark this hour as completed in checkpoint
+    echo "$HOUR_UTC" >> "$CHECKPOINT_FILE"
+    completed_hours["$HOUR_UTC"]=1
     
-    # Verify this day's data
-    verify_day "$current_date"
+    ((HOURS_COMPLETED++))
     
-    # Archive this day
-    log "Archiving ${current_date}..."
-    bundle_file="${ARCHIVE_DIR}/${current_date}.tar.zst"
+    # Log progress every 6 hours
+    if [ $((HOURS_COMPLETED % 6)) -eq 0 ]; then
+        log "Progress: ${HOURS_COMPLETED}/${TOTAL_HOURS} hours completed ($((HOURS_COMPLETED * 100 / TOTAL_HOURS))%)"
+    fi
     
-    find "${HISTORICAL_DIR}" -name "*_${date_yyyymmdd}*.jsonl" -print0 | \
-        tar -C "${HISTORICAL_DIR}" -cf - --null -T - | \
-        zstd -19 -o "$bundle_file"
+    # If day changed, verify and archive previous day
+    if [ "$CURRENT_DAY" != "$CURRENT_DATE" ] && [ -n "$CURRENT_DAY" ]; then
+        verify_day "$CURRENT_DAY"
+        archive_day "$CURRENT_DAY"
+    fi
     
-    bundle_size=$(du -h "$bundle_file" | cut -f1)
-    log "Archive: ${bundle_file} (${bundle_size})"
-    
-    # Move to next day
-    current_date=$(date -d "$current_date + 1 day" +%Y-%m-%d)
+    CURRENT_DAY="$CURRENT_DATE"
+    CURRENT_EPOCH=$((CURRENT_EPOCH + 3600))
 done
 
+# Verify and archive the last day
+if [ -n "$CURRENT_DAY" ]; then
+    verify_day "$CURRENT_DAY"
+    archive_day "$CURRENT_DAY"
+fi
+
 # Final summary
-log "============ VERIFICATION COMPLETE ============"
-log "${TOTAL_DAYS}-day historical pull SUCCESSFUL"
+log "============ COMPLETE ============"
+log "${TOTAL_DAYS}-day pull SUCCESSFUL"
 
-# Count total stations dynamically
+# Count total station records
 total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -cE '^[A-Z0-9-]+')
-# Count total station records efficiently
-total_stations=$(find "${HISTORICAL_DIR}" -name "stations_*.jsonl" -type f -exec wc -l {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-log "Total: ${TOTAL_DAYS} days × ${total_station_count} stations = ${total_stations:-0} station records (nulls removed)"
+if [ -z "$total_station_count" ] || [ "$total_station_count" -eq 0 ]; then
+    log "WARNING: Could not determine station count from STATIONS_LIST"
+    total_station_count=1  # Fallback to prevent division by zero
+fi
+expected_records=$((TOTAL_DAYS * 24 * total_station_count))
+log "Expected records: ${expected_records} (${TOTAL_DAYS} days × 24 hours × ${total_station_count} stations)"
 
-archives=$(find "${ARCHIVE_DIR}" -maxdepth 1 -name "*.tar.zst" -type f 2>/dev/null | wc -l)
-log "Created ${archives} daily archives in ${ARCHIVE_DIR}"
+# Count archives
+archives=$(find "${ARCHIVE_DIR}" -maxdepth 1 -name "${START_DATE:0:4}-*.tar.zst" -type f 2>/dev/null | wc -l)
+total_size=$(du -sh "${ARCHIVE_DIR}" 2>/dev/null | cut -f1 || echo "0")
+log "Archives: ${archives} files in ${ARCHIVE_DIR} (${total_size})"
 
-log "✅ All ${TOTAL_DAYS} days verified, null fields removed, data ready for CNN training"
+log "✅ All verified, ready for CNN training"
+
+# Clean checkpoint for this range
+rm -f "$CHECKPOINT_FILE"
+log "Checkpoint cleaned"

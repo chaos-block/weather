@@ -3,9 +3,26 @@ set -euo pipefail
 
 source conf.env
 cd "$(dirname "$0")"
-HOUR_UTC=$(date -u -d '3 hours ago' +%Y%m%dT%H)
-OUTPUT_FILE="${CURRENT_DIR}/radar_${HOUR_UTC}Z.jsonl"
-mkdir -p "$CURRENT_DIR" "$LOGS_DIR"
+
+# Calculate time for radar pull
+# Can be overridden by OVERRIDE_TIMESTAMP for historical pulls
+if [ -n "${OVERRIDE_TIMESTAMP:-}" ]; then
+  # Historical mode: use provided timestamp
+  TIMESTAMP="$OVERRIDE_TIMESTAMP"
+  LOOKBACK_DATE=$(date -u -d "$TIMESTAMP")
+else
+  # Real-time mode: use 3 hours ago lookback
+  LOOKBACK_DATE=$(date -u -d '3 hours ago')
+  TIMESTAMP=$(date -u -d "$LOOKBACK_DATE" +"%Y-%m-%dT%H:00:00Z")
+fi
+
+HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +%Y%m%dT%H)
+
+# Output directory can be overridden for historical pulls
+OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${CURRENT_DIR}}"
+mkdir -p "$OUTPUT_DIR" "$LOGS_DIR"
+
+OUTPUT_FILE="${OUTPUT_DIR}/radar_${HOUR_UTC}Z.jsonl"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] radar: $1" | tee -a "${LOGS_DIR}/radar.log"; }
 
@@ -16,9 +33,6 @@ YEAR=${HOUR_UTC:0:4}
 MON=${HOUR_UTC:4:2}
 DAY=${HOUR_UTC:6:2}
 HH=${HOUR_UTC:9:2}
-
-# Format timestamp for JSON output
-TIMESTAMP="${YEAR}-${MON}-${DAY}T${HH}:00:00Z"
 
 # AWS S3 path for NEXRAD Level 2 data
 # Example: s3://noaa-nexrad-level2/2025/12/31/KNKX/KNKX20251231_160000_V06
