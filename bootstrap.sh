@@ -57,7 +57,7 @@ case "$MODE" in
     if [ $# -eq 2 ]; then
       # Single date: pull last 72 hours ending at that date
       END_DATE="$2"
-      START_DATE=$(date -u -d "$END_DATE - 72 hours" +%Y-%m-%d 2>/dev/null) || {
+      START_DATE=$(date -u -d "$END_DATE 00:00:00 UTC - 72 hours" +%Y-%m-%d 2>/dev/null) || {
         log "ERROR: Invalid date format: $END_DATE"
         exit 1
       }
@@ -72,11 +72,11 @@ case "$MODE" in
     fi
     
     # Validate dates
-    START_EPOCH=$(date -d "$START_DATE" +%s 2>/dev/null) || {
+    START_EPOCH=$(date -u -d "$START_DATE 00:00:00" +%s 2>/dev/null) || {
       log "ERROR: Invalid START_DATE format: $START_DATE"
       exit 1
     }
-    END_EPOCH=$(date -d "$END_DATE 23:59:59" +%s 2>/dev/null) || {
+    END_EPOCH=$(date -u -d "$END_DATE 23:59:59" +%s 2>/dev/null) || {
       log "ERROR: Invalid END_DATE format: $END_DATE"
       exit 1
     }
