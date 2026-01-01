@@ -76,7 +76,7 @@ elif [ "$MODE" = "historical_full" ]; then
     END_DATE=$(date -u +%Y-%m-%d)
     log "WARNING: Running FULL historical pull from 2015 to present"
     log "This will take several days/weeks to complete"
-    read -p "Are you sure? (yes/no) " -n 3 -r
+    read -p "Are you sure? (yes/no) " -r
     echo
     if [[ $REPLY =~ ^yes$ ]]; then
         log "Starting full historical pull (${START_DATE} → ${END_DATE})"
