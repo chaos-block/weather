@@ -58,18 +58,31 @@ if ! command -v aws &> /dev/null; then
     LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
       'BEGIN {print int((lat_max - lat_min) / res)}')
     
+    # Create temp file for parallel output
+    TEMP_OUTPUT="${OUTPUT_FILE}.tmp"
+    > "$TEMP_OUTPUT"
+    
     # Generate grid in parallel using xargs (4 parallel jobs)
+    # Each process writes to a separate temp file, then we concatenate
     seq 0 $((LAT_POINTS - 1)) | \
-    xargs -P 4 -I {} awk -v lat_idx={} \
-      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
-      -v lon_max="${LON_MAX}" -v res="0.004" \
-      -v timestamp="${TIMESTAMP}" \
-      'BEGIN {
+    xargs -P 4 -I {} sh -c 'awk -v lat_idx={} \
+      -v lat_min="'"${LAT_MIN}"'" -v lon_min="'"${LON_MIN}"'" \
+      -v lon_max="'"${LON_MAX}"'" -v res="0.004" \
+      -v timestamp="'"${TIMESTAMP}"'" \
+      '"'"'BEGIN {
         lat = lat_min + (lat_idx * res)
         for (lon = lon_min; lon < lon_max; lon += res) {
           printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
         }
-      }' >> "$OUTPUT_FILE"
+      }'"'"' > "'"${TEMP_OUTPUT}"'.{}"'
+    
+    # Concatenate all temp files in order
+    for i in $(seq 0 $((LAT_POINTS - 1))); do
+      cat "${TEMP_OUTPUT}.$i" >> "$OUTPUT_FILE"
+      rm -f "${TEMP_OUTPUT}.$i"
+    done
+    rm -f "$TEMP_OUTPUT"
+    
     GRID_COUNT=$(wc -l < "$OUTPUT_FILE")
     log "Radar grid written (no AWS CLI): $OUTPUT_FILE (${GRID_COUNT} points)"
     exit 0
@@ -85,18 +98,30 @@ if [ -z "$FILES" ]; then
     LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
       'BEGIN {print int((lat_max - lat_min) / res)}')
     
+    # Create temp file for parallel output
+    TEMP_OUTPUT="${OUTPUT_FILE}.tmp"
+    > "$TEMP_OUTPUT"
+    
     # Generate grid in parallel using xargs (4 parallel jobs)
+    # Each process writes to a separate temp file, then we concatenate
     seq 0 $((LAT_POINTS - 1)) | \
-    xargs -P 4 -I {} awk -v lat_idx={} \
-      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
-      -v lon_max="${LON_MAX}" -v res="0.004" \
-      -v timestamp="${TIMESTAMP}" \
-      'BEGIN {
+    xargs -P 4 -I {} sh -c 'awk -v lat_idx={} \
+      -v lat_min="'"${LAT_MIN}"'" -v lon_min="'"${LON_MIN}"'" \
+      -v lon_max="'"${LON_MAX}"'" -v res="0.004" \
+      -v timestamp="'"${TIMESTAMP}"'" \
+      '"'"'BEGIN {
         lat = lat_min + (lat_idx * res)
         for (lon = lon_min; lon < lon_max; lon += res) {
           printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
         }
-      }' >> "$OUTPUT_FILE"
+      }'"'"' > "'"${TEMP_OUTPUT}"'.{}"'
+    
+    # Concatenate all temp files in order
+    for i in $(seq 0 $((LAT_POINTS - 1))); do
+      cat "${TEMP_OUTPUT}.$i" >> "$OUTPUT_FILE"
+      rm -f "${TEMP_OUTPUT}.$i"
+    done
+    rm -f "$TEMP_OUTPUT"
 else
     log "Found radar files, processing..."
     
@@ -107,18 +132,30 @@ else
     LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
       'BEGIN {print int((lat_max - lat_min) / res)}')
     
+    # Create temp file for parallel output
+    TEMP_OUTPUT="${OUTPUT_FILE}.tmp"
+    > "$TEMP_OUTPUT"
+    
     # Generate grid in parallel using xargs (4 parallel jobs)
+    # Each process writes to a separate temp file, then we concatenate
     seq 0 $((LAT_POINTS - 1)) | \
-    xargs -P 4 -I {} awk -v lat_idx={} \
-      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
-      -v lon_max="${LON_MAX}" -v res="0.004" \
-      -v timestamp="${TIMESTAMP}" \
-      'BEGIN {
+    xargs -P 4 -I {} sh -c 'awk -v lat_idx={} \
+      -v lat_min="'"${LAT_MIN}"'" -v lon_min="'"${LON_MIN}"'" \
+      -v lon_max="'"${LON_MAX}"'" -v res="0.004" \
+      -v timestamp="'"${TIMESTAMP}"'" \
+      '"'"'BEGIN {
         lat = lat_min + (lat_idx * res)
         for (lon = lon_min; lon < lon_max; lon += res) {
           printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
         }
-      }' >> "$OUTPUT_FILE"
+      }'"'"' > "'"${TEMP_OUTPUT}"'.{}"'
+    
+    # Concatenate all temp files in order
+    for i in $(seq 0 $((LAT_POINTS - 1))); do
+      cat "${TEMP_OUTPUT}.$i" >> "$OUTPUT_FILE"
+      rm -f "${TEMP_OUTPUT}.$i"
+    done
+    rm -f "$TEMP_OUTPUT"
 fi
 
 GRID_COUNT=$(wc -l < "$OUTPUT_FILE")

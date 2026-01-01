@@ -210,7 +210,9 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       wait
       
       # Read results from temp files
-      [ -f "${STATION_TEMP_DIR}/tide_ht.tmp" ] && vals[tide_height_ft]=$(cat "${STATION_TEMP_DIR}/tide_ht.tmp")
+      if [ -f "${STATION_TEMP_DIR}/tide_ht.tmp" ]; then
+        vals[tide_height_ft]=$(cat "${STATION_TEMP_DIR}/tide_ht.tmp")
+      fi
       
       if [ -f "${STATION_TEMP_DIR}/currents.tmp" ]; then
         currents=$(cat "${STATION_TEMP_DIR}/currents.tmp")
@@ -224,7 +226,9 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
         vals[wind_dir_deg]=$(echo "$wind" | jq -r '.dir')
       fi
       
-      [ -f "${STATION_TEMP_DIR}/vis.tmp" ] && vals[visibility_mi]=$(cat "${STATION_TEMP_DIR}/vis.tmp")
+      if [ -f "${STATION_TEMP_DIR}/vis.tmp" ]; then
+        vals[visibility_mi]=$(cat "${STATION_TEMP_DIR}/vis.tmp")
+      fi
       
       # Clean up temp directory
       rm -rf "${STATION_TEMP_DIR}"
