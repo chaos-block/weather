@@ -27,6 +27,41 @@ OUTPUT_FILE="${OUTPUT_DIR}/radar_${HOUR_UTC}Z.jsonl"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] radar: $1" | tee -a "${LOGS_DIR}/radar.log"; }
 
+# Function to generate radar grid in parallel
+generate_radar_grid_parallel() {
+  local output_file="$1"
+  local lat_min="$2"
+  local lat_max="$3"
+  local lon_min="$4"
+  local lon_max="$5"
+  local timestamp="$6"
+  local resolution="0.004"  # Grid resolution in degrees
+  
+  # Calculate number of latitude points
+  local lat_points=$(awk -v lat_min="$lat_min" -v lat_max="$lat_max" -v res="$resolution" \
+    'BEGIN {print int((lat_max - lat_min) / res)}')
+  
+  # Generate grid in parallel using xargs (4 parallel jobs)
+  # Each process writes to a separate temp file, then we concatenate
+  seq 0 $((lat_points - 1)) | \
+  xargs -P 4 -I {} sh -c 'awk -v lat_idx={} \
+    -v lat_min="'"$lat_min"'" -v lon_min="'"$lon_min"'" \
+    -v lon_max="'"$lon_max"'" -v res="'"$resolution"'" \
+    -v timestamp="'"$timestamp"'" \
+    '"'"'BEGIN {
+      lat = lat_min + (lat_idx * res)
+      for (lon = lon_min; lon < lon_max; lon += res) {
+        printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
+      }
+    }'"'"' > "'"$output_file"'.tmp.{}"'
+  
+  # Concatenate all temp files in order
+  for i in $(seq 0 $((lat_points - 1))); do
+    cat "${output_file}.tmp.$i" >> "$output_file"
+    rm -f "${output_file}.tmp.$i"
+  done
+}
+
 log "Starting radar pull for ${HOUR_UTC}"
 
 # Extract date components
@@ -53,17 +88,7 @@ FILE_PATTERN="${RADAR_SITE}${YEAR}${MON}${DAY}_${HH}"
 # Check if AWS CLI is available
 if ! command -v aws &> /dev/null; then
     log "WARNING: aws CLI not found - generating null grid"
-    # Create empty output file with null reflectivity values using pure bash/awk
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    generate_radar_grid_parallel "$OUTPUT_FILE" "$LAT_MIN" "$LAT_MAX" "$LON_MIN" "$LON_MAX" "$TIMESTAMP"
     GRID_COUNT=$(wc -l < "$OUTPUT_FILE")
     log "Radar grid written (no AWS CLI): $OUTPUT_FILE (${GRID_COUNT} points)"
     exit 0
@@ -74,33 +99,14 @@ FILES=$(aws s3 ls "${S3_PATH}" 2>/dev/null | grep "${FILE_PATTERN}" | awk '{prin
 
 if [ -z "$FILES" ]; then
     log "WARNING: No radar files found for ${HOUR_UTC} - generating null grid"
-    # Create output with null reflectivity values using pure bash/awk (no numpy)
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    generate_radar_grid_parallel "$OUTPUT_FILE" "$LAT_MIN" "$LAT_MAX" "$LON_MIN" "$LON_MAX" "$TIMESTAMP"
 else
     log "Found radar files, processing..."
     
     # Download and process radar data
     # For now, create grid with null values as placeholder
     # Full implementation would use pyart or wradlib to process NEXRAD Level 2 data
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    generate_radar_grid_parallel "$OUTPUT_FILE" "$LAT_MIN" "$LAT_MAX" "$LON_MIN" "$LON_MAX" "$TIMESTAMP"
 fi
 
 GRID_COUNT=$(wc -l < "$OUTPUT_FILE")

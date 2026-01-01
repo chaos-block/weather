@@ -105,6 +105,9 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
     continue
   fi
   
+  # Time the station processing
+  START_TIME=$(date +%s%N)
+  
   log "Processing $station_id ($source)"
 
   # Initialize all fields to null
@@ -126,71 +129,104 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${DATE_YYYYMMDD}&end_date=${DATE_YYYYMMDD}&time_zone=gmt&units=english&format=json"
       [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&application=${NOAA_TOKEN}"
 
+      # Create unique temp directory for this station to avoid collisions
+      STATION_TEMP_DIR=$(mktemp -d)
+      
+      # Start all API calls in parallel (background jobs)
       # Tide height - OBSERVED data only:  use water_level with 6-minute interval, aggregate to hourly
       if echo "$fields" | grep -q "tide_height_ft"; then
-        url="${BASE}&product=water_level&datum=MLLW&interval=6"
-        response=$(curl -sf "$url" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Aggregate all 6-minute observations within the target hour to get hourly mean
-          vals[tide_height_ft]=$(echo "$response" | jq -r --arg hour "${HOUR_UTC: 0:13}" \
-            '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
-             if length > 0 then (add / length) else null end')
-        else
-          error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
-          log "WARNING: Failed to fetch tide height for $station_id:  $error_msg"
-        fi
+        (
+          url="${BASE}&product=water_level&datum=MLLW&interval=6"
+          response=$(curl -sf "$url" 2>/dev/null || echo "")
+          if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            # Aggregate all 6-minute observations within the target hour to get hourly mean
+            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+              '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
+               if length > 0 then (add / length) else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
+          else
+            echo "null" > "${STATION_TEMP_DIR}/tide_ht.tmp"
+            error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
+            log "WARNING: Failed to fetch tide height for $station_id:  $error_msg"
+          fi
+        ) &
       fi
 
       # Tidal currents (speed and direction) - OBSERVED data only
       if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
-        url="${BASE}&product=currents"
-        response=$(curl -sf "$url" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get data for our specific hour and calculate averages
-          hour_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(.t | startswith($hour))]')
-          
-          if [ "$(echo "$hour_data" | jq '. | length')" -gt 0 ]; then
-            # Average speed for the hour
-            vals[tide_speed_kts]=$(echo "$hour_data" | jq -r \
-              '[.[].s | tonumber] | if length > 0 then (add / length) else null end')
-            
-            # Direction:  simple arithmetic mean
-            vals[tide_dir_deg]=$(echo "$hour_data" | jq -r \
-              '[.[].d | tonumber] | if length > 0 then (add / length) else null end')
+        (
+          url="${BASE}&product=currents"
+          response=$(curl -sf "$url" 2>/dev/null || echo "")
+          if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            # Get data for our specific hour and calculate averages
+            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+              '[.data[] | select(.t | startswith($hour))] | 
+               if length > 0 then {
+                 speed: ([.[].s | tonumber] | add / length),
+                 dir: ([.[].d | tonumber] | add / length)
+               } else {speed: null, dir: null} end' > "${STATION_TEMP_DIR}/currents.tmp"
+          else
+            echo '{"speed":null,"dir":null}' > "${STATION_TEMP_DIR}/currents.tmp"
+            error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
+            log "WARNING: Failed to fetch currents for $station_id: $error_msg"
           fi
-        else
-          error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
-          log "WARNING: Failed to fetch currents for $station_id: $error_msg"
-        fi
+        ) &
       fi
 
       # Wind - only if field is explicitly requested for this station
       if echo "$fields" | grep -q "wind_spd_kts\|wind_dir_deg"; then
-        response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get first record matching our hour
-          wind_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(.t | startswith($hour))] | .[0]')
-          vals[wind_spd_kts]=$(echo "$wind_data" | jq -r '.s // null')
-          vals[wind_dir_deg]=$(echo "$wind_data" | jq -r '.d // null')
-        else
-          log "WARNING: Failed to fetch wind for $station_id"
-        fi
+        (
+          response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
+          if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            # Get first record matching our hour
+            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+              '[.data[] | select(.t | startswith($hour))] | 
+               if length > 0 then {
+                 spd: (.[0].s // null),
+                 dir: (.[0].d // null)
+               } else {spd: null, dir: null} end' > "${STATION_TEMP_DIR}/wind.tmp"
+          else
+            echo '{"spd":null,"dir":null}' > "${STATION_TEMP_DIR}/wind.tmp"
+            log "WARNING: Failed to fetch wind for $station_id"
+          fi
+        ) &
       fi
 
       # Visibility - only if field is explicitly requested for this station
       if echo "$fields" | grep -q "visibility_mi"; then
-        response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
-        if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-          # Get first record matching our hour
-          vis_data=$(echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
-            '[.data[] | select(.t | startswith($hour))] | .[0]')
-          vals[visibility_mi]=$(echo "$vis_data" | jq -r '.v // null')
-        else
-          log "WARNING: Failed to fetch visibility for $station_id"
-        fi
+        (
+          response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
+          if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            # Get first record matching our hour
+            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+              '[.data[] | select(.t | startswith($hour))] | .[0].v // null' > "${STATION_TEMP_DIR}/vis.tmp"
+          else
+            echo "null" > "${STATION_TEMP_DIR}/vis.tmp"
+            log "WARNING: Failed to fetch visibility for $station_id"
+          fi
+        ) &
       fi
+      
+      # Wait for all background jobs to complete
+      wait
+      
+      # Read results from temp files (use consistent error handling pattern)
+      vals[tide_height_ft]=$(cat "${STATION_TEMP_DIR}/tide_ht.tmp" 2>/dev/null || echo "null")
+      vals[visibility_mi]=$(cat "${STATION_TEMP_DIR}/vis.tmp" 2>/dev/null || echo "null")
+      
+      if [ -f "${STATION_TEMP_DIR}/currents.tmp" ]; then
+        currents=$(cat "${STATION_TEMP_DIR}/currents.tmp" 2>/dev/null || echo '{"speed":null,"dir":null}')
+        vals[tide_speed_kts]=$(echo "$currents" | jq -r '.speed')
+        vals[tide_dir_deg]=$(echo "$currents" | jq -r '.dir')
+      fi
+      
+      if [ -f "${STATION_TEMP_DIR}/wind.tmp" ]; then
+        wind=$(cat "${STATION_TEMP_DIR}/wind.tmp" 2>/dev/null || echo '{"spd":null,"dir":null}')
+        vals[wind_spd_kts]=$(echo "$wind" | jq -r '.spd')
+        vals[wind_dir_deg]=$(echo "$wind" | jq -r '.dir')
+      fi
+      
+      # Clean up temp directory
+      rm -rf "${STATION_TEMP_DIR}"
       ;;
 
     NDBC)
@@ -348,6 +384,11 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       sunrise_time: $sunrise,
       sunset_time: $sunset
     } | del(.[] | select(. == null))' >> "$TEMP_FILE"
+  
+  # Calculate elapsed time
+  END_TIME=$(date +%s%N)
+  ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+  log "Processed $station_id in ${ELAPSED_MS}ms"
 done
 
 # Atomic move to final location
