@@ -5,7 +5,7 @@ source conf.env || { echo "Error: conf.env not found"; exit 1; }
 cd "$(dirname "$0")"
 
 LOG_FILE="${LOGS_DIR}/stations.log"
-mkdir -p "${CURRENT_DIR}" "${LOGS_DIR}"
+mkdir -p "${LOGS_DIR}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stations:  $1" | tee -a "$LOG_FILE"; }
 
@@ -27,8 +27,9 @@ HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
-# Output directory can be overridden for historical pulls
-OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${CURRENT_DIR}}"
+# Output to /data/YYYY/ directory (new architecture)
+YEAR=$(date -u -d "$LOOKBACK_DATE" +%Y)
+OUTPUT_DIR="${OVERRIDE_OUTPUT_DIR:-${DATA_DIR}/${YEAR}}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Use temp file for atomic write
@@ -77,6 +78,22 @@ sunrise=$(echo "$astro_data" | grep sunrise_time | cut -d= -f2 | tr -d ' ')
 sunset=$(echo "$astro_data" | grep sunset_time | cut -d= -f2 | tr -d ' ')
 
 log "Astronomical data:  moon=${moon_phase}%, sunrise=${sunrise}, sunset=${sunset}"
+
+# Helper function to check if field is expected but missing
+check_field() {
+  local station_id="$1"
+  local field_name="$2"
+  local field_value="$3"
+  local expected_fields="$4"
+  
+  # Check if this field is expected for this station
+  if echo "$expected_fields" | grep -q "$field_name"; then
+    # Field is expected - check if it's null or empty
+    if [ "$field_value" = "null" ] || [ -z "$field_value" ]; then
+      log "WARNING: $field_name missing for $station_id (expected but got nothing)"
+    fi
+  fi
+}
 
 # Process each station
 echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat lon source fields; do
@@ -290,6 +307,16 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       log "ERROR: Unknown source '$source' for station $station_id"
       ;;
   esac
+
+  # Check for expected fields that returned null/empty
+  check_field "$station_id" "tide_height_ft" "${vals[tide_height_ft]}" "$fields"
+  check_field "$station_id" "tide_speed_kts" "${vals[tide_speed_kts]}" "$fields"
+  check_field "$station_id" "tide_dir_deg" "${vals[tide_dir_deg]}" "$fields"
+  check_field "$station_id" "visibility_mi" "${vals[visibility_mi]}" "$fields"
+  check_field "$station_id" "cloud_pct" "${vals[cloud_pct]}" "$fields"
+  check_field "$station_id" "wave_ht_ft" "${vals[wave_ht_ft]}" "$fields"
+  check_field "$station_id" "wind_spd_kts" "${vals[wind_spd_kts]}" "$fields"
+  check_field "$station_id" "wind_dir_deg" "${vals[wind_dir_deg]}" "$fields"
 
   # Construct JSON output with all fields (using jq for safety)
   jq -nc \
