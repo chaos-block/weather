@@ -6,6 +6,8 @@ set -euo pipefail
 # Simplified architecture with /data/YYYY/ structure
 # Modes:
 #   ./bootstrap.sh                                      # Default: pull last 72 hours (all 3 products)
+#   ./bootstrap.sh pull 2025-12-24                      # Pull last 72 hours ending at date
+#   ./bootstrap.sh pull 2025-12-22 2025-12-26           # Pull specific date range
 #   ./bootstrap.sh verify                               # Verify last 14 days
 #   ./bootstrap.sh verify 7                             # Verify last 7 days
 #   ./bootstrap.sh verify 2025-12-01 2025-12-31         # Verify date range
@@ -36,7 +38,89 @@ chmod +x pull_stations.sh pull_radar.sh pull_ais.sh bundle.sh verify.sh 2>/dev/n
 
 MODE="${1:-default}"
 
+# Helper function to pull data for a specific hour (used by both default and pull modes)
+pull_hour() {
+  local HOUR_TIMESTAMP="$1"
+  local HOUR_UTC="$2"
+  local PRODUCT="$3"
+  
+  if ! OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh"; then
+    log "WARNING: ${PRODUCT^} pull failed for $HOUR_UTC"
+  fi
+}
+
 case "$MODE" in
+  pull)
+    log "Starting historical pull for date range"
+    
+    # Parse arguments
+    if [ $# -eq 2 ]; then
+      # Single date: pull last 72 hours ending at that date
+      END_DATE="$2"
+      START_DATE=$(date -u -d "$END_DATE - 72 hours" +%Y-%m-%d 2>/dev/null) || {
+        log "ERROR: Invalid date format: $END_DATE"
+        exit 1
+      }
+    elif [ $# -eq 3 ]; then
+      # Date range
+      START_DATE="$2"
+      END_DATE="$3"
+    else
+      log "ERROR: Invalid arguments for pull mode"
+      log "Usage: $0 pull YYYY-MM-DD [END_DATE]"
+      exit 1
+    fi
+    
+    # Validate dates
+    START_EPOCH=$(date -d "$START_DATE" +%s 2>/dev/null) || {
+      log "ERROR: Invalid START_DATE format: $START_DATE"
+      exit 1
+    }
+    END_EPOCH=$(date -d "$END_DATE 23:59:59" +%s 2>/dev/null) || {
+      log "ERROR: Invalid END_DATE format: $END_DATE"
+      exit 1
+    }
+    
+    if [ $START_EPOCH -ge $END_EPOCH ]; then
+      log "ERROR: START_DATE must be before END_DATE"
+      exit 1
+    fi
+    
+    TOTAL_HOURS=$(( (END_EPOCH - START_EPOCH) / 3600 ))
+    log "Date range: ${START_DATE}T00:00:00Z → ${END_DATE}T23:59:59Z ($TOTAL_HOURS hours)"
+    
+    # Loop hour-by-hour through date range
+    CURRENT_EPOCH=$START_EPOCH
+    HOURS_COMPLETED=0
+    
+    while [ $CURRENT_EPOCH -lt $END_EPOCH ]; do
+      HOUR_TIMESTAMP=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%dT%H:00:00Z)
+      HOUR_UTC=$(date -u -d "@$CURRENT_EPOCH" +%Y%m%dT%H)
+      YEAR=$(date -u -d "@$CURRENT_EPOCH" +%Y)
+      
+      log "Starting pull for ${HOUR_UTC}"
+      log "Data directory: ${DATA_DIR}/${YEAR}/"
+      
+      # Pull stations, radar, and AIS for this hour
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "stations"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "radar"
+      pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "ais"
+      
+      ((HOURS_COMPLETED++))
+      
+      # Log progress every 12 hours
+      if [ $((HOURS_COMPLETED % 12)) -eq 0 ]; then
+        log "Progress: ${HOURS_COMPLETED}/${TOTAL_HOURS} hours completed"
+      fi
+      
+      # Move to next hour
+      CURRENT_EPOCH=$((CURRENT_EPOCH + 3600))
+    done
+    
+    log "All pulls complete"
+    log "Data stored in: ${DATA_DIR}/YYYY/ (no subdirectories)"
+    ;;
+    
   verify)
     log "Starting verification mode"
     if [ $# -eq 1 ]; then
@@ -73,17 +157,6 @@ case "$MODE" in
   default)
     log "Minimal bootstrap started"
     log "Running all pulls for last 72 hours"
-    
-    # Helper function to pull data for a specific hour
-    pull_hour() {
-      local HOUR_TIMESTAMP="$1"
-      local HOUR_UTC="$2"
-      local PRODUCT="$3"
-      
-      if ! OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh"; then
-        log "WARNING: ${PRODUCT^} pull failed for $HOUR_UTC"
-      fi
-    }
     
     # Calculate date range for last 72 hours
     END_HOUR=$(date -u +%Y-%m-%dT%H:00:00Z)
@@ -128,8 +201,9 @@ case "$MODE" in
     
   *)
     log "ERROR: Unknown mode: $MODE"
-    log "Usage: $0 [verify|bundle|default]"
+    log "Usage: $0 [pull|verify|bundle|default]"
     log "  default  - Pull last 72 hours (all 3 products)"
+    log "  pull     - Pull historical date range"
     log "  verify   - Verify data completeness"
     log "  bundle   - Bundle monthly data"
     exit 1
