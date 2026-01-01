@@ -53,17 +53,23 @@ FILE_PATTERN="${RADAR_SITE}${YEAR}${MON}${DAY}_${HH}"
 # Check if AWS CLI is available
 if ! command -v aws &> /dev/null; then
     log "WARNING: aws CLI not found - generating null grid"
-    # Create empty output file with null reflectivity values using pure bash/awk
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    # Create empty output file with null reflectivity values using parallel awk
+    # Calculate number of latitude points
+    LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
+      'BEGIN {print int((lat_max - lat_min) / res)}')
+    
+    # Generate grid in parallel using xargs (4 parallel jobs)
+    seq 0 $((LAT_POINTS - 1)) | \
+    xargs -P 4 -I {} awk -v lat_idx={} \
+      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
+      -v lon_max="${LON_MAX}" -v res="0.004" \
+      -v timestamp="${TIMESTAMP}" \
+      'BEGIN {
+        lat = lat_min + (lat_idx * res)
+        for (lon = lon_min; lon < lon_max; lon += res) {
+          printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
+        }
+      }' >> "$OUTPUT_FILE"
     GRID_COUNT=$(wc -l < "$OUTPUT_FILE")
     log "Radar grid written (no AWS CLI): $OUTPUT_FILE (${GRID_COUNT} points)"
     exit 0
@@ -74,33 +80,45 @@ FILES=$(aws s3 ls "${S3_PATH}" 2>/dev/null | grep "${FILE_PATTERN}" | awk '{prin
 
 if [ -z "$FILES" ]; then
     log "WARNING: No radar files found for ${HOUR_UTC} - generating null grid"
-    # Create output with null reflectivity values using pure bash/awk (no numpy)
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    # Create output with null reflectivity values using parallel awk processing
+    # Calculate number of latitude points
+    LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
+      'BEGIN {print int((lat_max - lat_min) / res)}')
+    
+    # Generate grid in parallel using xargs (4 parallel jobs)
+    seq 0 $((LAT_POINTS - 1)) | \
+    xargs -P 4 -I {} awk -v lat_idx={} \
+      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
+      -v lon_max="${LON_MAX}" -v res="0.004" \
+      -v timestamp="${TIMESTAMP}" \
+      'BEGIN {
+        lat = lat_min + (lat_idx * res)
+        for (lon = lon_min; lon < lon_max; lon += res) {
+          printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
+        }
+      }' >> "$OUTPUT_FILE"
 else
     log "Found radar files, processing..."
     
     # Download and process radar data
     # For now, create grid with null values as placeholder
     # Full implementation would use pyart or wradlib to process NEXRAD Level 2 data
-    awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" \
-        -v lon_min="${LON_MIN}" -v lon_max="${LON_MAX}" \
-        -v res="0.004" -v timestamp="${TIMESTAMP}" \
-        'BEGIN {
-          for (lat = lat_min; lat < lat_max; lat += res) {
-            for (lon = lon_min; lon < lon_max; lon += res) {
-              printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
-            }
-          }
-        }' > "$OUTPUT_FILE"
+    # Calculate number of latitude points
+    LAT_POINTS=$(awk -v lat_min="${LAT_MIN}" -v lat_max="${LAT_MAX}" -v res="0.004" \
+      'BEGIN {print int((lat_max - lat_min) / res)}')
+    
+    # Generate grid in parallel using xargs (4 parallel jobs)
+    seq 0 $((LAT_POINTS - 1)) | \
+    xargs -P 4 -I {} awk -v lat_idx={} \
+      -v lat_min="${LAT_MIN}" -v lon_min="${LON_MIN}" \
+      -v lon_max="${LON_MAX}" -v res="0.004" \
+      -v timestamp="${TIMESTAMP}" \
+      'BEGIN {
+        lat = lat_min + (lat_idx * res)
+        for (lon = lon_min; lon < lon_max; lon += res) {
+          printf "{\"lat\":%.6f,\"lon\":%.6f,\"timestamp\":\"%s\",\"reflectivity_dbz\":null}\n", lat, lon, timestamp
+        }
+      }' >> "$OUTPUT_FILE"
 fi
 
 GRID_COUNT=$(wc -l < "$OUTPUT_FILE")
