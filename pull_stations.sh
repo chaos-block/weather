@@ -209,22 +209,21 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       # Wait for all background jobs to complete
       wait
       
-      # Read results from temp files (files are guaranteed to exist after wait)
+      # Read results from temp files (use consistent error handling pattern)
       vals[tide_height_ft]=$(cat "${STATION_TEMP_DIR}/tide_ht.tmp" 2>/dev/null || echo "null")
+      vals[visibility_mi]=$(cat "${STATION_TEMP_DIR}/vis.tmp" 2>/dev/null || echo "null")
       
       if [ -f "${STATION_TEMP_DIR}/currents.tmp" ]; then
-        currents=$(cat "${STATION_TEMP_DIR}/currents.tmp")
+        currents=$(cat "${STATION_TEMP_DIR}/currents.tmp" 2>/dev/null || echo '{"speed":null,"dir":null}')
         vals[tide_speed_kts]=$(echo "$currents" | jq -r '.speed')
         vals[tide_dir_deg]=$(echo "$currents" | jq -r '.dir')
       fi
       
       if [ -f "${STATION_TEMP_DIR}/wind.tmp" ]; then
-        wind=$(cat "${STATION_TEMP_DIR}/wind.tmp")
+        wind=$(cat "${STATION_TEMP_DIR}/wind.tmp" 2>/dev/null || echo '{"spd":null,"dir":null}')
         vals[wind_spd_kts]=$(echo "$wind" | jq -r '.spd')
         vals[wind_dir_deg]=$(echo "$wind" | jq -r '.dir')
       fi
-      
-      vals[visibility_mi]=$(cat "${STATION_TEMP_DIR}/vis.tmp" 2>/dev/null || echo "null")
       
       # Clean up temp directory
       rm -rf "${STATION_TEMP_DIR}"

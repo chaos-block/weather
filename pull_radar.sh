@@ -35,9 +35,10 @@ generate_radar_grid_parallel() {
   local lon_min="$4"
   local lon_max="$5"
   local timestamp="$6"
+  local resolution="0.004"  # Grid resolution in degrees
   
   # Calculate number of latitude points
-  local lat_points=$(awk -v lat_min="$lat_min" -v lat_max="$lat_max" -v res="0.004" \
+  local lat_points=$(awk -v lat_min="$lat_min" -v lat_max="$lat_max" -v res="$resolution" \
     'BEGIN {print int((lat_max - lat_min) / res)}')
   
   # Generate grid in parallel using xargs (4 parallel jobs)
@@ -45,7 +46,7 @@ generate_radar_grid_parallel() {
   seq 0 $((lat_points - 1)) | \
   xargs -P 4 -I {} sh -c 'awk -v lat_idx={} \
     -v lat_min="'"$lat_min"'" -v lon_min="'"$lon_min"'" \
-    -v lon_max="'"$lon_max"'" -v res="0.004" \
+    -v lon_max="'"$lon_max"'" -v res="'"$resolution"'" \
     -v timestamp="'"$timestamp"'" \
     '"'"'BEGIN {
       lat = lat_min + (lat_idx * res)
