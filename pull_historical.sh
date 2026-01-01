@@ -487,9 +487,9 @@ while [ "$(date -d "$current_date" +%s)" -lt "$END_EPOCH" ]; do
     done
     
     # Count records for this day
-    stations_count=$(find "${HISTORICAL_DIR}" -name "stations_${date_yyyymmdd}*.jsonl" -exec wc -l {} + | tail -1 | awk '{print $1}')
-    radar_count=$(find "${HISTORICAL_DIR}" -name "radar_${date_yyyymmdd}*.jsonl" -exec wc -l {} + | tail -1 | awk '{print $1}')
-    ais_count=$(find "${HISTORICAL_DIR}" -name "ais_${date_yyyymmdd}*.jsonl" -exec wc -l {} + | tail -1 | awk '{print $1}')
+    stations_count=$(find "${HISTORICAL_DIR}" -name "stations_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
+    radar_count=$(find "${HISTORICAL_DIR}" -name "radar_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
+    ais_count=$(find "${HISTORICAL_DIR}" -name "ais_${date_yyyymmdd}*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
     
     log "  Stations: ${stations_count:-0} records"
     log "  Radar: ${radar_count:-0} points"
@@ -517,10 +517,12 @@ done
 log "============ VERIFICATION COMPLETE ============"
 log "${TOTAL_DAYS}-day historical pull SUCCESSFUL"
 
-total_stations=$(find "${HISTORICAL_DIR}" -name "stations_*.jsonl" -exec wc -l {} + | tail -1 | awk '{print $1}')
-log "Total: ${TOTAL_DAYS} days × 17 stations = ${total_stations:-0} station records (nulls removed)"
+# Count total stations dynamically
+total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -c '^[A-Z0-9-]')
+total_stations=$(find "${HISTORICAL_DIR}" -name "stations_*.jsonl" -type f -exec cat {} + 2>/dev/null | wc -l)
+log "Total: ${TOTAL_DAYS} days × ${total_station_count} stations = ${total_stations:-0} station records (nulls removed)"
 
-archives=$(find "${ARCHIVE_DIR}" -name "*.tar.zst" | wc -l)
+archives=$(find "${ARCHIVE_DIR}" -maxdepth 1 -name "*.tar.zst" -type f 2>/dev/null | wc -l)
 log "Created ${archives} daily archives in ${ARCHIVE_DIR}"
 
 log "✅ All ${TOTAL_DAYS} days verified, null fields removed, data ready for CNN training"

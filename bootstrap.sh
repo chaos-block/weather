@@ -103,9 +103,9 @@ elif [ "$MODE" = "verify" ]; then
         date_yyyymmdd=$(date -d "$current_date" +%Y%m%d)
         
         # Check station files
-        stations_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "stations_${date_yyyymmdd}*.jsonl" 2>/dev/null -exec wc -l {} + | tail -1 | awk '{print $1}')
-        radar_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "radar_${date_yyyymmdd}*.jsonl" 2>/dev/null -exec wc -l {} + | tail -1 | awk '{print $1}')
-        ais_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "ais_${date_yyyymmdd}*.jsonl" 2>/dev/null -exec wc -l {} + | tail -1 | awk '{print $1}')
+        stations_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "stations_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec cat {} + 2>/dev/null | wc -l)
+        radar_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "radar_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec cat {} + 2>/dev/null | wc -l)
+        ais_count=$(find "${CURRENT_DIR}" "${DATA_DIR}/historical" -name "ais_${date_yyyymmdd}*.jsonl" -type f 2>/dev/null -exec cat {} + 2>/dev/null | wc -l)
         
         log "${current_date}: Stations=${stations_count:-0} Radar=${radar_count:-0} AIS=${ais_count:-0}"
         
