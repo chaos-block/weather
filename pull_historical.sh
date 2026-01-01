@@ -114,8 +114,15 @@ fetch_ais_hour() {
 }
 
 # Function to remove null fields from JSON files
+# Note: This is a safety measure as the individual pull scripts already remove nulls
+# This ensures consistency even if pull scripts are modified in the future
 remove_null_fields() {
     local HOUR_UTC="$1"
+    
+    # Only process files if REMOVE_NULLS flag is set
+    if [ "$REMOVE_NULLS" != "no-nulls" ]; then
+        return 0
+    fi
     
     for file in "${HISTORICAL_DIR}/stations_${HOUR_UTC}Z.jsonl" \
                 "${HISTORICAL_DIR}/radar_${HOUR_UTC}Z.jsonl" \
@@ -135,8 +142,11 @@ verify_day() {
     
     log "Verifying ${DATE} (24 hours complete)..."
     
-    # Count records per station for this day (sample a few key stations)
-    for station in 9410135 9410155 9410170 46047 SMN1401; do
+    # Get list of stations to verify from STATIONS_LIST
+    local sample_stations=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -E '^[A-Z0-9-]+' | head -5 | cut -d'|' -f1 | tr '\n' ' ')
+    
+    # Count records per station for this day (sample first 5 stations)
+    for station in $sample_stations; do
         local count=0
         local field_count=0
         
@@ -180,14 +190,19 @@ archive_day() {
     
     if [ -n "$FILES" ]; then
         # Bundle with zstd level 19
-        tar -C "${HISTORICAL_DIR}" -cf - $(basename -a $FILES) | \
-        zstd -19 -o "$BUNDLE_FILE"
+        # Use while read loop for safe handling of filenames with spaces
+        echo "$FILES" | while read -r file; do
+            basename "$file"
+        done | tar -C "${HISTORICAL_DIR}" -cf - -T - | zstd -19 -o "$BUNDLE_FILE"
         
         local SIZE=$(du -h "$BUNDLE_FILE" | cut -f1)
         log "${DATE}.tar.zst (${SIZE}) ✅"
         
         # Clean up source files after successful archival
-        echo "$FILES" | xargs rm -f
+        # Use while read for safe handling of filenames
+        echo "$FILES" | while read -r file; do
+            rm -f "$file"
+        done
     else
         log "No files found for ${DATE}"
     fi
@@ -254,7 +269,11 @@ log "============ COMPLETE ============"
 log "${TOTAL_DAYS}-day pull SUCCESSFUL"
 
 # Count total station records
-total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -cE '^[A-Z0-9-]+' || echo "17")
+total_station_count=$(echo "$STATIONS_LIST" | grep -v '^$' | grep -cE '^[A-Z0-9-]+')
+if [ -z "$total_station_count" ] || [ "$total_station_count" -eq 0 ]; then
+    log "WARNING: Could not determine station count from STATIONS_LIST"
+    total_station_count=1  # Fallback to prevent division by zero
+fi
 expected_records=$((TOTAL_DAYS * 24 * total_station_count))
 log "Expected records: ${expected_records} (${TOTAL_DAYS} days × 24 hours × ${total_station_count} stations)"
 
