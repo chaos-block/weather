@@ -124,25 +124,30 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
 
   case $source in
     NOAA)
-      # NOAA API requires begin_date and end_date in YYYYMMDD format for single day
-      DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
-      BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${DATE_YYYYMMDD}&end_date=${DATE_YYYYMMDD}&time_zone=gmt&units=english&format=json"
+      # NOAA API requires begin_date and end_date in YYYYMMDD format
+      # Use monthly date range to avoid API limits with hourly interval
+      YEAR_MONTH=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m')
+      MONTH_START=$(date -u -d "${YEAR_MONTH}-01" +'%Y%m%d')
+      # Get last day of month: go to first of next month, subtract one day
+      MONTH_END=$(date -u -d "${YEAR_MONTH}-01 +1 month -1 day" +'%Y%m%d')
+      
+      BASE="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${station_id}&begin_date=${MONTH_START}&end_date=${MONTH_END}&time_zone=gmt&units=english&format=json"
       [ -n "${NOAA_TOKEN:-}" ] && BASE="${BASE}&application=${NOAA_TOKEN}"
 
       # Create unique temp directory for this station to avoid collisions
       STATION_TEMP_DIR=$(mktemp -d)
       
       # Start all API calls in parallel (background jobs)
-      # Tide height - OBSERVED data only:  use water_level with 6-minute interval, aggregate to hourly
+      # Tide height - OBSERVED data only:  use water_level with hourly interval
       if echo "$fields" | grep -q "tide_height_ft"; then
         (
-          url="${BASE}&product=water_level&datum=MLLW&interval=6"
+          url="${BASE}&product=water_level&datum=MLLW&interval=h"
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-            # Aggregate all 6-minute observations within the target hour to get hourly mean
+            # Extract the record matching our specific hour
             echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
               '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
-               if length > 0 then (add / length) else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
+               if length > 0 then .[0] else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
           else
             echo "null" > "${STATION_TEMP_DIR}/tide_ht.tmp"
             error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
@@ -154,15 +159,15 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
       # Tidal currents (speed and direction) - OBSERVED data only
       if echo "$fields" | grep -q "tide_speed_kts\|tide_dir_deg"; then
         (
-          url="${BASE}&product=currents"
+          url="${BASE}&product=currents&interval=h"
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-            # Get data for our specific hour and calculate averages
+            # Get data for our specific hour
             echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
               '[.data[] | select(.t | startswith($hour))] | 
                if length > 0 then {
-                 speed: ([.[].s | tonumber] | add / length),
-                 dir: ([.[].d | tonumber] | add / length)
+                 speed: (.[0].s // null),
+                 dir: (.[0].d // null)
                } else {speed: null, dir: null} end' > "${STATION_TEMP_DIR}/currents.tmp"
           else
             echo '{"speed":null,"dir":null}' > "${STATION_TEMP_DIR}/currents.tmp"
