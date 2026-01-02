@@ -146,8 +146,8 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Extract the record matching our specific hour
-            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00"
-            # Convert HOUR_ISO (2025-12-01T00) to space format for startswith match
+            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00", not ISO format "2025-12-01T00:00"
+            # Convert HOUR_ISO (2025-12-01T00) to space format (2025-12-01 00) for startswith match
             HOUR_SPACE="${HOUR_ISO/T/ }"
             echo "$response" | jq -r --arg hour "$HOUR_SPACE" \
               '[.data[] | select(.t | startswith($hour))] | 
@@ -167,7 +167,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get data for our specific hour
-            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00"
+            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00", not ISO format "2025-12-01T00:00"
             HOUR_SPACE="${HOUR_ISO/T/ }"
             echo "$response" | jq -r --arg hour "$HOUR_SPACE" \
               '[.data[] | select(.t | startswith($hour))] | 
@@ -189,7 +189,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get first record matching our hour
-            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00"
+            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00", not ISO format "2025-12-01T00:00"
             HOUR_SPACE="${HOUR_ISO/T/ }"
             echo "$response" | jq -r --arg hour "$HOUR_SPACE" \
               '[.data[] | select(.t | startswith($hour))] | 
@@ -210,7 +210,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get first record matching our hour
-            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00"
+            # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00", not ISO format "2025-12-01T00:00"
             HOUR_SPACE="${HOUR_ISO/T/ }"
             echo "$response" | jq -r --arg hour "$HOUR_SPACE" \
               '[.data[] | select(.t | startswith($hour))] | 

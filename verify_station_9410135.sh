@@ -104,8 +104,8 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     hours_in_noaa=$(echo "$day_data" | jq 'length' 2>/dev/null || echo "0")
     
     # Test extraction using SAME jq logic as pull_stations.sh (lines 148-151)
-    # BUT: NOAA returns timestamps with SPACE format "2025-12-01 00:00"
-    # NOT T-format "2025-12-01T00:00", so we must use space for startswith()
+    # NOTE: NOAA returns timestamps with SPACE format "2025-12-01 00:00", not ISO format "2025-12-01T00:00"
+    # Therefore we must use space format for startswith() to match correctly
     for hour in {00..23}; do
       HOUR_SPACE="${CURRENT_DATE} ${hour}"
       extracted_value=$(echo "$day_data" | jq -r --arg hour "$HOUR_SPACE" \
@@ -136,9 +136,9 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
       if [ -n "$record" ]; then
         hours_in_output=$((hours_in_output + 1))
         
-        # Save for debug output
+        # Save for debug output - use same format as extraction for easy comparison
         tide_value=$(echo "$record" | jq -r '.tide_height_ft')
-        echo "${DATE_YYYYMMDD}T${hour}|${tide_value}" >> "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt"
+        echo "${CURRENT_DATE} ${hour}|${tide_value}" >> "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt"
       fi
     fi
   done
