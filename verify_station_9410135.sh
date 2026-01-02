@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# verify_station_9410135.sh – Standalone verification for station 9410135
+# verify_station_9410135.sh - Standalone verification for station 9410135
 # Diagnostic script to verify NOAA API data collection and jq extraction
 # 
 # Usage: ./verify_station_9410135.sh START_DATE END_DATE
@@ -97,15 +97,18 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
   hours_in_output=0
   
   if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+    # Filter to this specific date once and save
+    day_data=$(echo "$response" | jq -c --arg date "$CURRENT_DATE" '[.data[] | select(.t | startswith($date))]' 2>/dev/null || echo "[]")
+    
     # Count records for this specific date
-    hours_in_noaa=$(echo "$response" | jq -r --arg date "$CURRENT_DATE" '[.data[] | select(.t | startswith($date))] | length' 2>/dev/null || echo "0")
+    hours_in_noaa=$(echo "$day_data" | jq 'length' 2>/dev/null || echo "0")
     
     # Test extraction using SAME jq logic as pull_stations.sh (lines 148-151)
-    # For each hour, try to extract the value
+    # Process each hour from the pre-filtered day data
     for hour in {00..23}; do
       HOUR_ISO="${CURRENT_DATE} ${hour}"
-      extracted_value=$(echo "$response" | jq -r --arg hour "$HOUR_ISO" \
-        '[.data[] | select(.t | startswith($hour))] | if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' \
+      extracted_value=$(echo "$day_data" | jq -r --arg hour "$HOUR_ISO" \
+        '[.[] | select(.t | startswith($hour))] | if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' \
         2>/dev/null || echo "null")
       
       if [ "$extracted_value" != "null" ]; then
@@ -152,9 +155,8 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours in output files: ${hours_in_output}\n"
     
     # Show sample API response (first record of the day)
-    if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-      sample_api=$(echo "$response" | jq -r --arg date "$CURRENT_DATE" \
-        '[.data[] | select(.t | startswith($date))] | if length > 0 then .[0] else {} end' \
+    if [ -n "$day_data" ] && [ "$day_data" != "[]" ]; then
+      sample_api=$(echo "$day_data" | jq -r 'if length > 0 then .[0] else {} end' \
         2>/dev/null || echo "{}")
       DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample NOAA API response:\n${sample_api}\n"
     fi
