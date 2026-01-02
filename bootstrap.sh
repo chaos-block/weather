@@ -85,7 +85,7 @@ validate_scripts() {
   
   if [ $missing -eq 1 ]; then
     log "ERROR: One or more required scripts are missing"
-    log "ERROR: Run 'git pull origin main' to sync repository"
+    log "ERROR: Restore missing scripts from your git repository"
     exit 1
   fi
 }
