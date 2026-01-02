@@ -24,6 +24,7 @@ else
 fi
 
 HOUR_UTC=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%dT%H')
+HOUR_ISO=$(date -u -d "$LOOKBACK_DATE" +'%Y-%m-%dT%H')
 HOUR_YYYYMMDDHH=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d%H')
 DATE_YYYYMMDD=$(date -u -d "$LOOKBACK_DATE" +'%Y%m%d')
 
@@ -145,7 +146,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Extract the record matching our specific hour
-            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour)) | .v | tonumber] | 
                if length > 0 then .[0] else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
           else
@@ -163,7 +164,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "$url" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get data for our specific hour
-            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | 
                if length > 0 then {
                  speed: (.[0].s // null),
@@ -183,7 +184,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "${BASE}&product=wind&interval=h" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get first record matching our hour
-            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | 
                if length > 0 then {
                  spd: (.[0].s // null),
@@ -202,7 +203,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           response=$(curl -sf "${BASE}&product=visibility&interval=h" 2>/dev/null || echo "")
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get first record matching our hour
-            echo "$response" | jq -r --arg hour "${HOUR_UTC:0:13}" \
+            echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | .[0].v // null' > "${STATION_TEMP_DIR}/vis.tmp"
           else
             echo "null" > "${STATION_TEMP_DIR}/vis.tmp"
