@@ -36,6 +36,64 @@ source conf.env
 # Ensure scripts are executable
 chmod +x pull_stations.sh pull_radar.sh pull_ais.sh bundle.sh verify.sh 2>/dev/null || true
 
+# Auto-update bootstrap.sh from GitHub
+auto_update_bootstrap() {
+  log "Checking for bootstrap.sh updates from GitHub..."
+  
+  # Fetch latest from origin
+  if ! git fetch origin main --quiet 2>/dev/null; then
+    log "WARNING: Could not fetch from GitHub (offline?), continuing with local version"
+    return 0
+  fi
+  
+  # Check if remote version differs from local version
+  if git diff --quiet origin/main -- bootstrap.sh 2>/dev/null; then
+    # Local bootstrap is up-to-date
+    return 0
+  fi
+  
+  # Newer version exists on GitHub
+  log "Newer version of bootstrap.sh available, updating from GitHub..."
+  
+  if git checkout origin/main -- bootstrap.sh 2>/dev/null; then
+    log "Bootstrap updated successfully - re-executing with updated version"
+    # Re-execute this script with updated version
+    exec "$0" "$@"
+  else
+    log "WARNING: Could not update bootstrap.sh (permission denied?), continuing with local version"
+    return 0
+  fi
+}
+
+# Validate all required scripts exist
+validate_scripts() {
+  local required_scripts=(
+    "pull_stations.sh"
+    "pull_radar.sh"
+    "pull_ais.sh"
+    "verify.sh"
+    "bundle.sh"
+  )
+  
+  local missing=0
+  for script in "${required_scripts[@]}"; do
+    if [ ! -f "$script" ]; then
+      log "ERROR: Required script not found: $script"
+      missing=1
+    fi
+  done
+  
+  if [ $missing -eq 1 ]; then
+    log "ERROR: One or more required scripts are missing"
+    log "ERROR: Run 'git pull origin main' to sync repository"
+    exit 1
+  fi
+}
+
+# Call at startup
+auto_update_bootstrap
+validate_scripts
+
 MODE="${1:-default}"
 
 # Helper function to pull data for a specific hour (used by both default and pull modes)
