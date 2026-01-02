@@ -51,6 +51,9 @@ mkdir -p /data logs
 
 # Verify specific date range
 ./bootstrap.sh verify 2025-12-01 2025-12-31
+
+# Verify station 9410135 specifically (diagnostic)
+./verify_station_9410135.sh 2025-12-01 2025-12-31
 ```
 
 ### Monthly Bundling
@@ -180,6 +183,7 @@ Each line contains:
 - **`pull_ais.sh`**: Real-time AIS data collection (3-hour lookback)
 - **`bundle.sh`**: Monthly data bundling into `.tar.zst` archives
 - **`verify.sh`**: Data completeness verification with field-level checks
+- **`verify_station_9410135.sh`**: Diagnostic script for station 9410135 (South San Diego Bay)
 - **`bootstrap.sh`**: Main orchestration script
 
 ### Data Flow
@@ -209,6 +213,38 @@ Each line contains:
 ```
 
 ## Troubleshooting
+
+### Diagnostic Tools
+
+#### Station 9410135 Verification
+The `verify_station_9410135.sh` script is a diagnostic tool for validating NOAA API data collection for station 9410135 (South San Diego Bay - the primary tide observation station).
+
+**Usage:**
+```bash
+./verify_station_9410135.sh START_DATE END_DATE
+./verify_station_9410135.sh 2025-12-01 2025-12-31
+```
+
+**What it does:**
+- Fetches NOAA API water_level data for the specified date range
+- Uses the same jq extraction logic as `pull_stations.sh`
+- Compares extracted values with actual output files in `/data/YYYY/stations_*.jsonl`
+- Reports hourly data availability in a summary table
+- Shows debug information when discrepancies are found
+
+**Example output:**
+```
+Date         | Hours in NOAA  | Hours Extracted  | Hours in Output  | Status
+-------------+----------------+------------------+------------------+---------
+2025-12-01   | 24            | 24              | 24              | ✓ OK
+2025-12-02   | 24            | 24              | 20              | ✗ ISSUE
+```
+
+If issues are detected, the script provides:
+- Sample NOAA API response
+- Sample extracted values
+- Sample output file content
+- Count of missing/extra hours
 
 ### Permission Denied
 ```bash
