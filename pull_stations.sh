@@ -148,7 +148,7 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
             # Extract the record matching our specific hour
             echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | 
-               if length > 0 then (.[0].v // null | if . == null then null else tonumber end) else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
+               if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' > "${STATION_TEMP_DIR}/tide_ht.tmp"
           else
             echo "null" > "${STATION_TEMP_DIR}/tide_ht.tmp"
             error_msg=$(echo "$response" | jq -r '.error.message // "HTTP error"' 2>/dev/null || echo "Connection failed")
@@ -167,8 +167,8 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
             echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | 
                if length > 0 then {
-                 speed: (.[0].s // null | if . == null then null else tonumber end),
-                 dir: (.[0].d // null | if . == null then null else tonumber end)
+                 speed: (.[0].s | if . != null then tonumber else null end),
+                 dir: (.[0].d | if . != null then tonumber else null end)
                } else {speed: null, dir: null} end' > "${STATION_TEMP_DIR}/currents.tmp"
           else
             echo '{"speed":null,"dir":null}' > "${STATION_TEMP_DIR}/currents.tmp"
@@ -187,8 +187,8 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
             echo "$response" | jq -r --arg hour "$HOUR_ISO" \
               '[.data[] | select(.t | startswith($hour))] | 
                if length > 0 then {
-                 spd: (.[0].s // null),
-                 dir: (.[0].d // null)
+                 spd: (.[0].s | if . != null then tonumber else null end),
+                 dir: (.[0].d | if . != null then tonumber else null end)
                } else {spd: null, dir: null} end' > "${STATION_TEMP_DIR}/wind.tmp"
           else
             echo '{"spd":null,"dir":null}' > "${STATION_TEMP_DIR}/wind.tmp"
@@ -204,7 +204,8 @@ echo "$STATIONS_LIST" | grep -v '^$' | while IFS='|' read -r station_id name lat
           if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
             # Get first record matching our hour
             echo "$response" | jq -r --arg hour "$HOUR_ISO" \
-              '[.data[] | select(.t | startswith($hour))] | .[0].v // null' > "${STATION_TEMP_DIR}/vis.tmp"
+              '[.data[] | select(.t | startswith($hour))] | 
+               if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' > "${STATION_TEMP_DIR}/vis.tmp"
           else
             echo "null" > "${STATION_TEMP_DIR}/vis.tmp"
             log "WARNING: Failed to fetch visibility for $station_id"
