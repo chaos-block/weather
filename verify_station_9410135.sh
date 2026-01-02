@@ -155,23 +155,34 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours successfully extracted: ${hours_extracted}\n"
     DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours in output files: ${hours_in_output}\n"
     
+    # Show the timestamp format being used
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\nTimestamp format used for matching:\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  HOUR_SPACE format (for NOAA API): \"${CURRENT_DATE} 00\" (example)\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  NOAA API returns: \"${CURRENT_DATE} 00:00\" (example)\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  Match method: startswith() - API timestamp must start with HOUR_SPACE\n"
+    
+    # Show the jq filter being used
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\njq filter used for extraction:\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  '[.[] | select(.t | startswith(\$hour))] | if length > 0 then (.[0].v | tonumber) else null end'\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  where \$hour = \"${CURRENT_DATE} HH\" (space-separated, no minutes)\n"
+    
     # Show sample API response (first record of the day)
     if [ -n "$day_data" ] && [ "$day_data" != "[]" ]; then
       sample_api=$(echo "$day_data" | jq -r 'if length > 0 then .[0] else {} end' \
         2>/dev/null || echo "{}")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample NOAA API response:\n${sample_api}\n"
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample NOAA API response (first record):\n${sample_api}\n"
     fi
     
     # Show sample extraction
     if [ -f "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" ]; then
-      sample_extracted=$(head -1 "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample extracted values (timestamp|value):\n${sample_extracted}\n"
+      sample_extracted=$(head -3 "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample extracted values (first 3, format: timestamp|value):\n${sample_extracted}\n"
     fi
     
     # Show sample output file content
     if [ -f "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt" ]; then
-      sample_output=$(head -1 "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample output file content (timestamp|tide_height_ft):\n${sample_output}\n"
+      sample_output=$(head -3 "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample output file content (first 3, format: timestamp|tide_height_ft):\n${sample_output}\n"
     fi
     
     # Show which hours are missing
