@@ -69,10 +69,11 @@ CURRENT_EPOCH=$(date -d "$START_DATE" +%s)
 END_EPOCH=$(date -d "$END_DATE" +%s)
 
 while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
+  # Process each day in the range
   CURRENT_DATE=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m-%d)
-  DATE_YYYYMMDD=$(date -d "@$CURRENT_EPOCH" +%Y%m%d)
-  YEAR=$(date -d "@$CURRENT_EPOCH" +%Y)
-  YEAR_MONTH=$(date -d "@$CURRENT_EPOCH" +%Y-%m)
+  DATE_YYYYMMDD=$(date -u -d "@$CURRENT_EPOCH" +%Y%m%d)
+  YEAR=$(date -u -d "@$CURRENT_EPOCH" +%Y)
+  YEAR_MONTH=$(date -u -d "@$CURRENT_EPOCH" +%Y-%m)
   
   TOTAL_DAYS=$((TOTAL_DAYS + 1))
   
@@ -104,8 +105,8 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     for hour in {00..23}; do
       HOUR_ISO="${CURRENT_DATE} ${hour}"
       extracted_value=$(echo "$response" | jq -r --arg hour "$HOUR_ISO" \
-        '[.data[] | select(.t | startswith($hour))] | 
-         if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' 2>/dev/null || echo "null")
+        '[.data[] | select(.t | startswith($hour))] | if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end' \
+        2>/dev/null || echo "null")
       
       if [ "$extracted_value" != "null" ]; then
         hours_extracted=$((hours_extracted + 1))
@@ -127,7 +128,7 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     
     if [ -f "$stations_file" ]; then
       # Check if this file has a record for our station with tide_height_ft
-      record=$(jq -c "select(.station_id==\"$STATION_ID\") | select(.tide_height_ft != null)" "$stations_file" 2>/dev/null || echo "")
+      record=$(jq -c --arg station "$STATION_ID" 'select(.station_id==$station) | select(.tide_height_ft != null)' "$stations_file" 2>/dev/null || echo "")
       if [ -n "$record" ]; then
         hours_in_output=$((hours_in_output + 1))
         
@@ -152,7 +153,9 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     
     # Show sample API response (first record of the day)
     if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
-      sample_api=$(echo "$response" | jq -r --arg date "$CURRENT_DATE" '[.data[] | select(.t | startswith($date))] | .[0]' 2>/dev/null || echo "{}")
+      sample_api=$(echo "$response" | jq -r --arg date "$CURRENT_DATE" \
+        '[.data[] | select(.t | startswith($date))] | if length > 0 then .[0] else {} end' \
+        2>/dev/null || echo "{}")
       DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample NOAA API response:\n${sample_api}\n"
     fi
     
@@ -195,7 +198,7 @@ log "Days with discrepancies: $TOTAL_DISCREPANCIES"
 
 # Print debug output if there were any discrepancies
 if [ "$TOTAL_DISCREPANCIES" -gt 0 ]; then
-  printf "\n%b" "$DEBUG_OUTPUT"
+  echo -e "$DEBUG_OUTPUT"
 fi
 
 log "========================================="
