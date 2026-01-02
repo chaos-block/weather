@@ -102,9 +102,10 @@ pull_hour() {
   local HOUR_UTC="$2"
   local PRODUCT="$3"
   
-  if ! OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh"; then
+  # Use || true to suppress error exit codes and ensure loop continues
+  OVERRIDE_TIMESTAMP="$HOUR_TIMESTAMP" "./pull_${PRODUCT}.sh" 2>/dev/null || {
     log "WARNING: ${PRODUCT^} pull failed for $HOUR_UTC"
-  fi
+  }
 }
 
 case "$MODE" in
@@ -164,7 +165,7 @@ case "$MODE" in
       pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "radar"
       pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "ais"
       
-      ((HOURS_COMPLETED++))
+      HOURS_COMPLETED=$((HOURS_COMPLETED + 1))
       
       # Log progress every 12 hours
       if [ $((HOURS_COMPLETED % 12)) -eq 0 ]; then
@@ -242,7 +243,7 @@ case "$MODE" in
       pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "radar"
       pull_hour "$HOUR_TIMESTAMP" "$HOUR_UTC" "ais"
       
-      ((HOURS_COMPLETED++))
+      HOURS_COMPLETED=$((HOURS_COMPLETED + 1))
       
       # Log progress every 12 hours
       if [ $((HOURS_COMPLETED % 12)) -eq 0 ]; then
