@@ -2,3 +2,4 @@ conf.env
 *.log
 /data/
 /logs/
+/test_data/
