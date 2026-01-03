@@ -104,7 +104,7 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
   fi
   
   # Fetch data
-  response=$(curl -sf "$NOAA_URL" 2>/dev/null || echo "")
+  response=$(curl -sf --max-time 10 "$NOAA_URL" 2>/dev/null || echo "")
   
   # Count hours in NOAA API for this specific date
   hours_in_noaa=0
@@ -234,7 +234,7 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     
     # Show the jq filter being used
     DEBUG_OUTPUT="${DEBUG_OUTPUT}\njq Filter Used:\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  [.data[] | select(.t | startswith(\$hour))] | if length > 0 then (.[0].v | tonumber) else null end\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  [.data[] | select(.t | startswith(\$hour))] | if length > 0 then (.[0].v | if . != null then tonumber else null end) else null end\n"
     
     # Show HOUR_ISO and HOUR_SPACE examples
     DEBUG_OUTPUT="${DEBUG_OUTPUT}\nHOUR_ISO: ${CURRENT_DATE}T00\n"
