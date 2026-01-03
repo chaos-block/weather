@@ -98,6 +98,7 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
   hours_in_noaa=0
   hours_extracted=0
   hours_in_output=0
+  day_data="[]"
   
   if [ -n "$response" ] && echo "$response" | jq -e '.data' >/dev/null 2>&1; then
     # Filter to this specific date once and save
@@ -191,21 +192,27 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
     
     # Show actual output file records (first 3)
     DEBUG_OUTPUT="${DEBUG_OUTPUT}\nActual Output File (first 3 records with station 9410135):\n"
-    found_output=false
     output_records=""
+    record_count=0
     for hour in {00..23}; do
+      if [ "$record_count" -ge 3 ]; then
+        break
+      fi
       hour_utc="${DATE_YYYYMMDD}T${hour}"
       stations_file="${DATA_DIR}/${YEAR}/stations_${hour_utc}Z.jsonl"
       if [ -f "$stations_file" ]; then
-        records=$(jq -c --arg station "$STATION_ID" 'select(.station_id==$station)' "$stations_file" 2>/dev/null | head -3)
-        if [ -n "$records" ]; then
-          output_records="$records"
-          found_output=true
-          break
+        record=$(jq -c --arg station "$STATION_ID" 'select(.station_id==$station)' "$stations_file" 2>/dev/null || echo "")
+        if [ -n "$record" ]; then
+          if [ -z "$output_records" ]; then
+            output_records="$record"
+          else
+            output_records="${output_records}"$'\n'"${record}"
+          fi
+          record_count=$((record_count + 1))
         fi
       fi
     done
-    if [ "$found_output" = true ]; then
+    if [ -n "$output_records" ]; then
       while IFS= read -r line; do
         DEBUG_OUTPUT="${DEBUG_OUTPUT}  ${line}\n"
       done <<< "$output_records"
