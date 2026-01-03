@@ -273,6 +273,42 @@ if [ "$TOTAL_DISCREPANCIES" -gt 0 ]; then
   echo -e "$DEBUG_OUTPUT"
 fi
 
+# Final Analysis - determine root cause
+printf "\n"
+log "========================================="
+log "FINAL ANALYSIS"
+log "========================================="
+
+# Determine the primary issue based on the data patterns
+# Note: Check most specific cases first, then fall back to general inconsistency case
+# The final else case handles situations where totals match but per-day discrepancies exist
+if [ "$TOTAL_HOURS_NOAA" -eq 0 ] && [ "$TOTAL_HOURS_EXTRACTED" -eq 0 ] && [ "$TOTAL_HOURS_OUTPUT" -eq 0 ]; then
+  log "❌ NOAA has NO data → No observations available for station $STATION_ID in this date range"
+elif [ "$TOTAL_HOURS_NOAA" -gt 0 ] && [ "$TOTAL_HOURS_EXTRACTED" -eq 0 ]; then
+  log "❌ JQ EXTRACTION FAILED → Time format mismatch between NOAA API and jq filter"
+  log "   NOAA returned $TOTAL_HOURS_NOAA hours of data, but jq extracted 0 values"
+  log "   Check that HOUR_SPACE format matches NOAA's timestamp format"
+elif [ "$TOTAL_HOURS_EXTRACTED" -gt 0 ] && [ "$TOTAL_HOURS_OUTPUT" -eq 0 ]; then
+  log "❌ OUTPUT FILES NOT WRITTEN → pull_stations.sh may not be running or files not being created"
+  log "   Successfully extracted $TOTAL_HOURS_EXTRACTED values, but found 0 in output files"
+  log "   Check: ${DATA_DIR}/YYYY/stations_*.jsonl files"
+elif [ "$TOTAL_HOURS_EXTRACTED" -gt "$TOTAL_HOURS_OUTPUT" ]; then
+  missing=$((TOTAL_HOURS_EXTRACTED - TOTAL_HOURS_OUTPUT))
+  log "⚠️  PARTIAL DATA LOSS → $missing hours missing from output files"
+  log "   Extracted: $TOTAL_HOURS_EXTRACTED hours, Output: $TOTAL_HOURS_OUTPUT hours"
+  log "   Possible causes: Files being overwritten, pull_stations.sh race conditions, or disk issues"
+elif [ "$TOTAL_HOURS_OUTPUT" -gt "$TOTAL_HOURS_EXTRACTED" ]; then
+  extra=$((TOTAL_HOURS_OUTPUT - TOTAL_HOURS_EXTRACTED))
+  log "⚠️  EXTRA DATA IN OUTPUT → $extra more hours in output than extracted"
+  log "   This suggests output files contain data from previous runs or other sources"
+elif [ "$TOTAL_DISCREPANCIES" -eq 0 ]; then
+  log "✅ ALL DATA ACCOUNTED FOR → Pipeline working correctly!"
+  log "   NOAA: $TOTAL_HOURS_NOAA hours, Extracted: $TOTAL_HOURS_EXTRACTED hours, Output: $TOTAL_HOURS_OUTPUT hours"
+else
+  log "⚠️  INCONSISTENT DATA → Mixed issues detected across different dates"
+  log "   Review debug output above for per-day details"
+fi
+
 log "========================================="
 log "Verification complete"
 
