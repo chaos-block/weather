@@ -280,6 +280,8 @@ log "FINAL ANALYSIS"
 log "========================================="
 
 # Determine the primary issue based on the data patterns
+# Note: Check most specific cases first, then fall back to general inconsistency case
+# The final else case handles situations where totals match but per-day discrepancies exist
 if [ "$TOTAL_HOURS_NOAA" -eq 0 ] && [ "$TOTAL_HOURS_EXTRACTED" -eq 0 ] && [ "$TOTAL_HOURS_OUTPUT" -eq 0 ]; then
   log "❌ NOAA has NO data → No observations available for station $STATION_ID in this date range"
 elif [ "$TOTAL_HOURS_NOAA" -gt 0 ] && [ "$TOTAL_HOURS_EXTRACTED" -eq 0 ]; then
