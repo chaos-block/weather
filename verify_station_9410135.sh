@@ -35,6 +35,18 @@ if ! date -d "$START_DATE" >/dev/null 2>&1 || ! date -d "$END_DATE" >/dev/null 2
   exit 1
 fi
 
+# Check if jq is installed
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is not installed. Please install jq to use this script."
+  exit 1
+fi
+
+# Check if curl is installed
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Error: curl is not installed. Please install curl to use this script."
+  exit 1
+fi
+
 mkdir -p "$LOGS_DIR"
 LOG_FILE="${LOGS_DIR}/verify_9410135.log"
 TEMP_DIR=$(mktemp -d)
