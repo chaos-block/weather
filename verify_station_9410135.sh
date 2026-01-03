@@ -55,14 +55,17 @@ log "Product: $PRODUCT, Datum: $DATUM, Interval: $INTERVAL"
 log "========================================="
 
 # Print table header
-printf "\n%-12s | %-14s | %-16s | %-16s | %s\n" "Date" "Hours in NOAA" "Hours Extracted" "Hours in Output" "Status"
-printf "%.12s-+-%.14s-+-%.16s-+-%.16s-+-%s\n" "------------" "--------------" "----------------" "----------------" "--------"
+printf "\n%-12s | %-12s | %-11s | %-8s | %s\n" "Date" "Hours NOAA" "Extracted" "Output" "Status"
+printf "%.12s-+-%.12s-+-%.11s-+-%.8s-+-%s\n" "------------" "------------" "-----------" "--------" "---------"
 
 # Track overall statistics
 TOTAL_DAYS=0
 TOTAL_OK=0
 TOTAL_DISCREPANCIES=0
 DEBUG_OUTPUT=""
+TOTAL_HOURS_NOAA=0
+TOTAL_HOURS_EXTRACTED=0
+TOTAL_HOURS_OUTPUT=0
 
 # Process each day in the range
 CURRENT_EPOCH=$(date -d "$START_DATE" +%s)
@@ -145,61 +148,97 @@ while [ "$CURRENT_EPOCH" -le "$END_EPOCH" ]; do
   
   # Determine status
   status="✓ OK"
-  if [ "$hours_in_noaa" -ne "$hours_extracted" ] || [ "$hours_extracted" -ne "$hours_in_output" ]; then
-    status="✗ ISSUE"
+  if [ "$hours_in_noaa" -eq 0 ] && [ "$hours_extracted" -eq 0 ] && [ "$hours_in_output" -eq 0 ]; then
+    status="✓ OK (no data)"
+    TOTAL_OK=$((TOTAL_OK + 1))
+  elif [ "$hours_in_noaa" -ne "$hours_extracted" ] || [ "$hours_extracted" -ne "$hours_in_output" ]; then
+    missing_count=$((hours_extracted - hours_in_output))
+    if [ "$missing_count" -gt 0 ]; then
+      status="✗ MISSING ${missing_count}"
+    elif [ "$missing_count" -lt 0 ]; then
+      status="✗ EXTRA $((missing_count * -1))"
+    else
+      # NOAA vs extracted mismatch
+      extraction_diff=$((hours_in_noaa - hours_extracted))
+      status="✗ EXTRACTION FAIL ${extraction_diff}"
+    fi
     TOTAL_DISCREPANCIES=$((TOTAL_DISCREPANCIES + 1))
     
     # Build debug output for this date
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}\n\n=== DEBUG INFO for ${CURRENT_DATE} ===\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours in NOAA API: ${hours_in_noaa}\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours successfully extracted: ${hours_extracted}\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}Hours in output files: ${hours_in_output}\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\n\n=== DEBUG: ${CURRENT_DATE} ===\n"
     
-    # Show the timestamp format being used
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}\nTimestamp format used for matching:\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  HOUR_SPACE format (for NOAA API): \"${CURRENT_DATE} 00\" (example)\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  NOAA API returns: \"${CURRENT_DATE} 00:00\" (example)\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  Match method: startswith() - API timestamp must start with HOUR_SPACE\n"
+    # Show sample NOAA API response (first 3 records)
+    if [ -n "$day_data" ] && [ "$day_data" != "[]" ]; then
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nNOAA API Response (first 3 records):\n"
+      sample_api=$(echo "$day_data" | jq -c '.[:3][]' 2>/dev/null || echo "")
+      if [ -n "$sample_api" ]; then
+        while IFS= read -r line; do
+          DEBUG_OUTPUT="${DEBUG_OUTPUT}  ${line}\n"
+        done <<< "$sample_api"
+      fi
+    fi
+    
+    # Show extracted values (first 3)
+    if [ -f "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" ]; then
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nExtracted via jq (first 3 values):\n"
+      sample_extracted=$(head -3 "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" 2>/dev/null | cut -d'|' -f2 || echo "")
+      if [ -n "$sample_extracted" ]; then
+        while IFS= read -r line; do
+          DEBUG_OUTPUT="${DEBUG_OUTPUT}  ${line}\n"
+        done <<< "$sample_extracted"
+      fi
+    fi
+    
+    # Show actual output file records (first 3)
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\nActual Output File (first 3 records with station 9410135):\n"
+    found_output=false
+    output_records=""
+    for hour in {00..23}; do
+      hour_utc="${DATE_YYYYMMDD}T${hour}"
+      stations_file="${DATA_DIR}/${YEAR}/stations_${hour_utc}Z.jsonl"
+      if [ -f "$stations_file" ]; then
+        records=$(jq -c --arg station "$STATION_ID" 'select(.station_id==$station)' "$stations_file" 2>/dev/null | head -3)
+        if [ -n "$records" ]; then
+          output_records="$records"
+          found_output=true
+          break
+        fi
+      fi
+    done
+    if [ "$found_output" = true ]; then
+      while IFS= read -r line; do
+        DEBUG_OUTPUT="${DEBUG_OUTPUT}  ${line}\n"
+      done <<< "$output_records"
+    else
+      DEBUG_OUTPUT="${DEBUG_OUTPUT}  (no records found)\n"
+    fi
     
     # Show the jq filter being used
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}\njq filter used for extraction:\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  '[.[] | select(.t | startswith(\$hour))] | if length > 0 then (.[0].v | tonumber) else null end'\n"
-    DEBUG_OUTPUT="${DEBUG_OUTPUT}  where \$hour = \"${CURRENT_DATE} HH\" (space-separated, no minutes)\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\njq Filter Used:\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}  [.data[] | select(.t | startswith(\$hour))] | if length > 0 then (.[0].v | tonumber) else null end\n"
     
-    # Show sample API response (first record of the day)
-    if [ -n "$day_data" ] && [ "$day_data" != "[]" ]; then
-      sample_api=$(echo "$day_data" | jq -r 'if length > 0 then .[0] else {} end' \
-        2>/dev/null || echo "{}")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample NOAA API response (first record):\n${sample_api}\n"
-    fi
-    
-    # Show sample extraction
-    if [ -f "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" ]; then
-      sample_extracted=$(head -3 "${TEMP_DIR}/extracted_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample extracted values (first 3, format: timestamp|value):\n${sample_extracted}\n"
-    fi
-    
-    # Show sample output file content
-    if [ -f "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt" ]; then
-      sample_output=$(head -3 "${TEMP_DIR}/output_${DATE_YYYYMMDD}.txt" 2>/dev/null || echo "none")
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nSample output file content (first 3, format: timestamp|tide_height_ft):\n${sample_output}\n"
-    fi
-    
-    # Show which hours are missing
-    missing_count=$((hours_extracted - hours_in_output))
-    if [ "$missing_count" -ne 0 ]; then
-      DEBUG_OUTPUT="${DEBUG_OUTPUT}\nMissing/Extra hours: ${missing_count}\n"
-    fi
+    # Show HOUR_ISO and HOUR_SPACE examples
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}\nHOUR_ISO: ${CURRENT_DATE}T00\n"
+    DEBUG_OUTPUT="${DEBUG_OUTPUT}HOUR_SPACE: ${CURRENT_DATE} 00\n"
   else
     TOTAL_OK=$((TOTAL_OK + 1))
   fi
   
+  # Accumulate totals
+  TOTAL_HOURS_NOAA=$((TOTAL_HOURS_NOAA + hours_in_noaa))
+  TOTAL_HOURS_EXTRACTED=$((TOTAL_HOURS_EXTRACTED + hours_extracted))
+  TOTAL_HOURS_OUTPUT=$((TOTAL_HOURS_OUTPUT + hours_in_output))
+  
   # Print row
-  printf "%-12s | %-14s | %-16s | %-16s | %s\n" "$CURRENT_DATE" "$hours_in_noaa" "$hours_extracted" "$hours_in_output" "$status"
+  printf "%-12s | %-12s | %-11s | %-8s | %s\n" "$CURRENT_DATE" "$hours_in_noaa" "$hours_extracted" "$hours_in_output" "$status"
   
   # Move to next day
   CURRENT_EPOCH=$((CURRENT_EPOCH + 86400))
 done
+
+# Print totals row
+printf "%.12s-+-%.12s-+-%.11s-+-%.8s-+-%s\n" "------------" "------------" "-----------" "--------" "---------"
+printf "%-12s | %-12s | %-11s | %-8s | %s\n" "TOTAL" "$TOTAL_HOURS_NOAA" "$TOTAL_HOURS_EXTRACTED" "$TOTAL_HOURS_OUTPUT" ""
 
 # Print summary
 printf "\n"
